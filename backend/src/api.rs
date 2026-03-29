@@ -7,9 +7,12 @@ use axum::{
 use rkyv::{Archive, Deserialize, Serialize};
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 use std::fs;
-use std::path::{Path as StdPath, PathBuf};
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use walkdir::WalkDir;
+
+pub mod bug_id_cache;
+use bug_id_cache::BugIdCache;
 
 /// Represents a single user-defined metadata entry.
 #[derive(Archive, Deserialize, Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
@@ -85,6 +88,8 @@ pub struct BugSummary {
 pub struct AppState {
     /// The root directory where bug data is stored.
     pub root: PathBuf,
+    /// Cache mapping bug IDs to folder locations.
+    pub cache: Mutex<BugIdCache>,
 }
 
 /// Query parameters for searching bugs.
@@ -114,7 +119,10 @@ pub async fn get_bug_list(
         };
         
         let archived = unsafe { rkyv::archived_root::<BugMetadata>(&data) };
-        let metadata: BugMetadata = archived.deserialize(&mut rkyv::Infallible).unwrap();
+        let metadata: BugMetadata = match archived.deserialize(&mut rkyv::Infallible) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
         
         // Requirement: bugs must have at least one component.
         if metadata.folders.is_empty() {
@@ -141,37 +149,38 @@ pub async fn get_bug_list(
 pub async fn get_bug(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
-) -> impl IntoResponse {
-    let bug_path = match find_bug_path(&state.root, id) {
-        Some(p) => p,
-        None => return (StatusCode::NOT_FOUND, "Bug not found").into_response(),
-    };
+) -> Result<impl IntoResponse, StatusCode> {
+    let bug_path = find_bug_path(&state, id)
+        .ok_or(StatusCode::NOT_FOUND)?;
 
-    let metadata_data = fs::read(bug_path.join("metadata")).unwrap();
+    let metadata_data = fs::read(bug_path.join("metadata"))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let archived_metadata = unsafe { rkyv::archived_root::<BugMetadata>(&metadata_data) };
-    let metadata: BugMetadata = archived_metadata.deserialize(&mut rkyv::Infallible).unwrap();
+    let metadata: BugMetadata = archived_metadata.deserialize(&mut rkyv::Infallible)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let mut comments = Vec::new();
-    for entry in fs::read_dir(&bug_path).unwrap() {
-        let entry = entry.unwrap();
-        let name = entry.file_name().into_string().unwrap();
-        if name.starts_with("comment_") {
-            let data = fs::read(entry.path()).unwrap();
-            let archived_comment = unsafe { rkyv::archived_root::<Comment>(&data) };
-            let comment: Comment = archived_comment.deserialize(&mut rkyv::Infallible).unwrap();
-            comments.push(comment);
+    if let Ok(dir) = fs::read_dir(&bug_path) {
+        for entry in dir.filter_map(|e| e.ok()) {
+            let name = entry.file_name().into_string().unwrap_or_default();
+            if name.starts_with("comment_") {
+                if let Ok(data) = fs::read(entry.path()) {
+                    let archived_comment = unsafe { rkyv::archived_root::<Comment>(&data) };
+                    let comment: Comment = archived_comment.deserialize(&mut rkyv::Infallible).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                    comments.push(comment);
+                }
+            }
         }
     }
-    comments.sort_by_key(|c| c.id);
+    comments.sort_by_key(|c: &Comment| c.id);
 
-    Json(Bug {
+    Ok(Json(Bug {
         id: metadata.id,
         title: metadata.title.clone(),
         folders: metadata.folders.clone(),
         metadata,
         comments,
-    })
-    .into_response()
+    }))
 }
 
 /// Request payload for submitting a new comment.
@@ -186,39 +195,41 @@ pub async fn submit_comment(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
     Json(payload): Json<CommentRequest>,
-) -> impl IntoResponse {
-    let bug_path = match find_bug_path(&state.root, id) {
-        Some(p) => p,
-        None => return (StatusCode::NOT_FOUND, "Bug not found").into_response(),
-    };
+) -> Result<impl IntoResponse, StatusCode> {
+    let bug_path = find_bug_path(&state, id)
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     let mut next_comment_id = 1;
-    for entry in fs::read_dir(&bug_path).unwrap() {
-        let entry = entry.unwrap();
-        let name = entry.file_name().into_string().unwrap();
-        if name.starts_with("comment_") {
-            if let Ok(cid) = name["comment_".len()..].parse::<u32>() {
-                if cid >= next_comment_id {
-                    next_comment_id = cid + 1;
+    if let Ok(dir) = fs::read_dir(&bug_path) {
+        for entry in dir.filter_map(|e| e.ok()) {
+            let name = entry.file_name().into_string().unwrap_or_default();
+            if name.starts_with("comment_") {
+                if let Ok(cid) = name["comment_".len()..].parse::<u32>() {
+                    if cid >= next_comment_id {
+                        next_comment_id = cid + 1;
+                    }
                 }
             }
         }
     }
 
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
     let comment = Comment {
         id: next_comment_id,
         author: payload.author,
-        epoch_nanoseconds: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u64,
+        epoch_nanoseconds: now.as_nanos() as u64,
         content: payload.content,
     };
 
-    let bytes = rkyv::to_bytes::<_, 256>(&comment).unwrap();
-    fs::write(bug_path.join(format!("comment_{:07}", next_comment_id)), bytes).unwrap();
+    let bytes = rkyv::to_bytes::<_, 256>(&comment)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    fs::write(bug_path.join(format!("comment_{:07}", next_comment_id)), bytes)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    StatusCode::CREATED.into_response()
+    Ok(StatusCode::CREATED)
 }
 
 /// Request payload for changing bug metadata.
@@ -234,16 +245,16 @@ pub async fn change_metadata(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
     Json(payload): Json<MetadataChangeRequest>,
-) -> impl IntoResponse {
-    let bug_path = match find_bug_path(&state.root, id) {
-        Some(p) => p,
-        None => return (StatusCode::NOT_FOUND, "Bug not found").into_response(),
-    };
+) -> Result<impl IntoResponse, StatusCode> {
+    let bug_path = find_bug_path(&state, id)
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     let metadata_file = bug_path.join("metadata");
-    let data = fs::read(&metadata_file).unwrap();
+    let data = fs::read(&metadata_file)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let archived = unsafe { rkyv::archived_root::<BugMetadata>(&data) };
-    let mut metadata: BugMetadata = archived.deserialize(&mut rkyv::Infallible).unwrap();
+    let mut metadata: BugMetadata = archived.deserialize(&mut rkyv::Infallible)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     match payload.field.as_str() {
         "status" => metadata.status = payload.value,
@@ -264,27 +275,18 @@ pub async fn change_metadata(
         }
     }
 
-    let bytes = rkyv::to_bytes::<_, 1024>(&metadata).unwrap();
-    fs::write(metadata_file, bytes).unwrap();
+    let bytes = rkyv::to_bytes::<_, 1024>(&metadata)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    fs::write(metadata_file, bytes)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    StatusCode::OK.into_response()
+    Ok(StatusCode::OK)
 }
 
-/// Helper function to locate the directory path of a bug given its ID.
-pub fn find_bug_path(root: &StdPath, id: u32) -> Option<PathBuf> {
-    for entry in WalkDir::new(root)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_name() == "metadata")
-    {
-        let data = fs::read(entry.path()).ok()?;
-        let archived = unsafe { rkyv::archived_root::<BugMetadata>(&data) };
-        let metadata: BugMetadata = archived.deserialize(&mut rkyv::Infallible).unwrap();
-        if metadata.id == id {
-            return entry.path().parent().map(|p| p.to_path_buf());
-        }
-    }
-    None
+/// Helper function to locate the directory path of a bug given its ID using the cache.
+pub fn find_bug_path(state: &AppState, id: u32) -> Option<PathBuf> {
+    let cache = state.cache.lock().ok()?;
+    cache.get_path(&state.root, id as u64)
 }
 
 #[cfg(test)]

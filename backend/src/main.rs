@@ -7,9 +7,10 @@ use axum::{
 use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tower_http::services::ServeDir;
 use crate::api::AppState;
+use crate::api::bug_id_cache::BugIdCache;
 
 #[derive(Parser)]
 struct Args {
@@ -40,8 +41,12 @@ async fn main() -> anyhow::Result<()> {
         fs::create_dir_all(&default_dir)?;
     }
 
+    // Load and update the bug ID cache.
+    let cache = BugIdCache::load_and_update(&args.root);
+
     let shared_state = Arc::new(AppState {
         root: args.root.clone(),
+        cache: Mutex::new(cache),
     });
 
     let app = Router::new()
