@@ -1,5 +1,5 @@
-import React from 'react';
-import { type Bug } from './api/api';
+import React, { useState, useEffect } from 'react';
+import { type Bug, type Comment, get_api } from './api/api';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { WrapToResult } from 'standard-ts-lib/src/wrap_to_result';
@@ -13,7 +13,16 @@ interface BugViewProps {
   onRefresh: (id: number) => void;
 }
 
-const BugView: React.FC<BugViewProps> = ({ bug, onHome, onRefresh }) => {
+const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh }) => {
+  const [bug, setBug] = useState<Bug>(initialBug);
+  const [commentText, setCommentText] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Synchronize local state when the bug prop changes (e.g., from a refresh)
+  useEffect(() => {
+    setBug(initialBug);
+  }, [initialBug]);
+
   const renderMarkdown = (content: string) => {
     const rawHtml = marked.parse(content) as string;
     return { __html: DOMPurify.sanitize(rawHtml, { RETURN_TRUSTED_TYPE: true }) as unknown as string };
@@ -44,6 +53,35 @@ const BugView: React.FC<BugViewProps> = ({ bug, onHome, onRefresh }) => {
     }
   };
 
+  const handleCommentSubmit = async () => {
+    if (!commentText.trim()) return;
+
+    const apiResult = get_api();
+    if (!apiResult.ok) return;
+
+    setIsSubmitting(true);
+    const result = await apiResult.val.submit_comment(bug.id, 'current_user', commentText);
+    
+    if (result.ok) {
+      const newCommentId = result.val;
+      const newComment: Comment = {
+        id: newCommentId,
+        author: 'current_user',
+        epochNanoseconds: BigInt(Date.now()) * 1000000n,
+        content: commentText,
+      };
+
+      setBug({
+        ...bug,
+        comments: [...bug.comments, newComment],
+      });
+      setCommentText('');
+    } else {
+      alert('Failed to submit comment: ' + result.val.message);
+    }
+    setIsSubmitting(false);
+  };
+
   return (
     <div className="bug-view">
       <div className="bug-header">
@@ -68,7 +106,6 @@ const BugView: React.FC<BugViewProps> = ({ bug, onHome, onRefresh }) => {
           </div>
 
           {bug.comments.map((comment) => (
-
             <div key={comment.id} className="comment-card">
               <div className="comment-header">
                 <strong>{comment.author}</strong> commented · {formatTemporalDate(comment.epochNanoseconds)} · #{comment.id}
@@ -76,6 +113,48 @@ const BugView: React.FC<BugViewProps> = ({ bug, onHome, onRefresh }) => {
               <div dangerouslySetInnerHTML={renderMarkdown(comment.content)} />
             </div>
           ))}
+
+          <div className="comment-input-section" style={{ marginTop: '20px' }}>
+            <textarea
+              style={{
+                width: 'calc(100% - 20px)',
+                height: '150px',
+                backgroundColor: '#1e1e1e',
+                color: 'white',
+                border: '1px solid #333',
+                borderRadius: '4px',
+                padding: '10px',
+                fontFamily: 'inherit',
+                resize: 'vertical'
+              }}
+              placeholder="Add a comment..."
+              value={commentText}
+              onChange={(e) => setCommentText(e.target.value)}
+            />
+            <div style={{ marginTop: '10px' }}>
+              <button
+                className="primary-btn"
+                onClick={handleCommentSubmit}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? 'submitting...' : 'comment'}
+              </button>
+            </div>
+            <div 
+              className="comment-preview" 
+              style={{ 
+                marginTop: '20px', 
+                border: '1px solid #666', 
+                borderRadius: '4px', 
+                padding: '10px', 
+                minHeight: '50px',
+                color: '#ccc'
+              }}
+            >
+              <div style={{ fontSize: '12px', color: '#888', marginBottom: '5px' }}>Preview</div>
+              <div dangerouslySetInnerHTML={renderMarkdown(commentText || '*No preview*')} />
+            </div>
+          </div>
         </div>
 
         <div className="bug-metadata">

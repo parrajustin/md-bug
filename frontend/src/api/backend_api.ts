@@ -40,7 +40,7 @@ export class BackendApi implements API {
     );
   }
 
-  async submit_comment(id: number, author: string, content: string): Promise<Result<void, StatusError>> {
+  async submit_comment(id: number, author: string, content: string): Promise<Result<number, StatusError>> {
     return WrapPromise(
       fetch(`${BACKEND_URL}/api/bug/${id}/comment`, {
         method: 'POST',
@@ -48,7 +48,7 @@ export class BackendApi implements API {
         body: JSON.stringify({ author, content })
       }).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
-        return undefined;
+        return resp.json();
       }),
       'Failed to submit comment'
     );

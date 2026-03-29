@@ -53,7 +53,7 @@ export interface BugSummary {
 export interface API {
   get_bug_list(query?: string): Promise<Result<BugSummary[], StatusError>>;
   get_bug(id: number): Promise<Result<Bug, StatusError>>;
-  submit_comment(id: number, author: string, content: string): Promise<Result<void, StatusError>>;
+  submit_comment(id: number, author: string, content: string): Promise<Result<number, StatusError>>;
   change_metadata(id: number, field: string, value: string): Promise<Result<void, StatusError>>;
 }
 

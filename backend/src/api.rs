@@ -231,7 +231,7 @@ pub async fn submit_comment(
     fs::write(bug_path.join(format!("comment_{:07}", next_comment_id)), bytes)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(StatusCode::CREATED)
+    Ok(Json(next_comment_id))
 }
 
 /// Request payload for changing bug metadata.

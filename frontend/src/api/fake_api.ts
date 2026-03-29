@@ -50,16 +50,17 @@ export class FakeApi implements API {
     return bug ? Ok(bug) : Err(NotFoundError(`Bug ${id} not found`));
   }
 
-  async submit_comment(id: number, author: string, content: string): Promise<Result<void, StatusError>> {
+  async submit_comment(id: number, author: string, content: string): Promise<Result<number, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
+    const newId = bug.comments.length + 1;
     bug.comments.push({
-      id: bug.comments.length + 1,
+      id: newId,
       author,
       content,
       epochNanoseconds: BigInt(Date.now()) * 1000000n
     });
-    return Ok(undefined);
+    return Ok(newId);
   }
 
   async change_metadata(id: number, field: string, value: string): Promise<Result<void, StatusError>> {
