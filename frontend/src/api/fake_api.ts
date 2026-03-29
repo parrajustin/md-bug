@@ -1,6 +1,6 @@
 import { type Result, Ok, Err } from 'standard-ts-lib/src/result';
 import { StatusError, NotFoundError } from 'standard-ts-lib/src/status_error';
-import type { API, Bug, BugSummary } from './api';
+import type { API, Bug, BugSummary, ChangeMetadataResponse, SubmitCommentResponse } from './api';
 
 export class FakeApi implements API {
   private mockBugs: Bug[] = [
@@ -23,7 +23,8 @@ export class FakeApi implements API {
           { key: "Hotlist", value: "AndroidGradlePlugin", type: "string" },
           { key: "Component ID", value: "192731", type: "string" }
         ],
-        createdAt: 1718016000000000000n
+        createdAt: 1718016000000000000n,
+        stateId: 1n
       },
       comments: [
         {
@@ -47,25 +48,32 @@ export class FakeApi implements API {
 
   async get_bug(id: number): Promise<Result<Bug, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
-    return bug ? Ok(bug) : Err(NotFoundError(`Bug ${id} not found`));
+    if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
+    if (bug.metadata.stateId === undefined) bug.metadata.stateId = 1n;
+    return Ok(bug);
   }
 
-  async submit_comment(id: number, author: string, content: string): Promise<Result<number, StatusError>> {
+  async submit_comment(id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
     const newId = bug.comments.length + 1;
+    bug.metadata.stateId = (bug.metadata.stateId || 1n) + 1n;
     bug.comments.push({
       id: newId,
       author,
       content,
       epochNanoseconds: BigInt(Date.now()) * 1000000n
     });
-    return Ok(newId);
+    return Ok({
+      commentId: newId,
+      stateId: bug.metadata.stateId
+    });
   }
 
-  async change_metadata(id: number, field: string, value: string): Promise<Result<void, StatusError>> {
+  async change_metadata(id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
+    bug.metadata.stateId = (bug.metadata.stateId || 1n) + 1n;
     const m = bug.metadata as any;
     if (field in m) {
       m[field] = value;
@@ -74,7 +82,9 @@ export class FakeApi implements API {
       if (entry) entry.value = value;
       else bug.metadata.userMetadata.push({ key: field, value, type: 'string' });
     }
-    return Ok(undefined);
+    return Ok({
+      stateId: bug.metadata.stateId
+    });
   }
 }
 

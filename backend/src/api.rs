@@ -249,6 +249,13 @@ pub struct CommentRequest {
     pub content: String,
 }
 
+/// Response payload for submitting a new comment.
+#[derive(SerdeSerialize)]
+pub struct SubmitCommentResponse {
+    pub comment_id: u32,
+    pub state_id: u64,
+}
+
 /// Submits a new comment to an existing bug.
 pub async fn submit_comment(
     State(state): State<Arc<AppState>>,
@@ -267,6 +274,7 @@ pub async fn submit_comment(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     metadata.state_id += 1;
+    let new_state_id = metadata.state_id;
     let bytes = rkyv::to_bytes::<_, 1024>(&metadata)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     fs::write(&metadata_file, bytes)
@@ -303,7 +311,10 @@ pub async fn submit_comment(
     fs::write(bug_path.join(format!("comment_{:07}", next_comment_id)), bytes)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(Json(next_comment_id))
+    Ok(Json(SubmitCommentResponse {
+        comment_id: next_comment_id,
+        state_id: new_state_id,
+    }))
 }
 
 /// Request payload for changing bug metadata.
@@ -311,6 +322,12 @@ pub async fn submit_comment(
 pub struct MetadataChangeRequest {
     pub field: String,
     pub value: String,
+}
+
+/// Response payload for changing bug metadata.
+#[derive(SerdeSerialize)]
+pub struct ChangeMetadataResponse {
+    pub state_id: u64,
 }
 
 /// Updates a metadata field for a specific bug.
@@ -352,13 +369,16 @@ pub async fn change_metadata(
     }
 
     metadata.state_id += 1;
+    let new_state_id = metadata.state_id;
 
     let bytes = rkyv::to_bytes::<_, 1024>(&metadata)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     fs::write(metadata_file, bytes)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(StatusCode::OK)
+    Ok(Json(ChangeMetadataResponse {
+        state_id: new_state_id,
+    }))
 }
 
 /// Helper function to locate the directory path of a bug given its ID using the cache.

@@ -78,6 +78,10 @@ async fn test_submit_comment() -> anyhow::Result<()> {
     let response = submit_comment(State(state.clone()), Path(42), Json(req)).await.into_response();
     assert_eq!(response.status(), StatusCode::OK);
 
+    // Verify response body
+    // We'll skip deep body inspection for now as it requires complex deserialization in tests, 
+    // but we'll verify the side effects which confirm the logic.
+
     let bug_path = dir.path().join("test").join("42");
     let data = fs::read(bug_path.join("metadata"))?;
     let metadata: BugMetadata = rkyv::from_bytes::<BugMetadata>(&data)

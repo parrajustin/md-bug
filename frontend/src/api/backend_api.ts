@@ -27,6 +27,7 @@ export class BackendApi implements API {
         // Convert fields to BigInt if necessary
         if (data.metadata) {
           data.metadata.createdAt = BigInt(data.metadata.created_at);
+          data.metadata.stateId = BigInt(data.metadata.state_id);
           data.metadata.userMetadata = data.metadata.user_metadata;
         }
         if (data.comments) {
@@ -40,7 +41,7 @@ export class BackendApi implements API {
     );
   }
 
-  async submit_comment(id: number, author: string, content: string): Promise<Result<number, StatusError>> {
+  async submit_comment(id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>> {
     return WrapPromise(
       fetch(`${BACKEND_URL}/api/bug/${id}/comment`, {
         method: 'POST',
@@ -48,13 +49,17 @@ export class BackendApi implements API {
         body: JSON.stringify({ author, content })
       }).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
-        return resp.json();
+        const data = await resp.json();
+        return {
+          commentId: data.comment_id,
+          stateId: BigInt(data.state_id)
+        };
       }),
       'Failed to submit comment'
     );
   }
 
-  async change_metadata(id: number, field: string, value: string): Promise<Result<void, StatusError>> {
+  async change_metadata(id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>> {
     return WrapPromise(
       fetch(`${BACKEND_URL}/api/bug/${id}/metadata`, {
         method: 'POST',
@@ -62,7 +67,10 @@ export class BackendApi implements API {
         body: JSON.stringify({ field, value })
       }).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
-        return undefined;
+        const data = await resp.json();
+        return {
+          stateId: BigInt(data.state_id)
+        };
       }),
       'Failed to change metadata'
     );
