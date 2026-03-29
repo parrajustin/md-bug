@@ -50,6 +50,7 @@ async fn test_create_and_get_bug() -> anyhow::Result<()> {
     let state = Arc::new(AppState { 
         root: dir.path().to_path_buf(),
         cache: Mutex::new(cache),
+        bug_locks: Mutex::new(HashMap::new()),
     });
 
     let response = get_bug(State(state.clone()), Path(1)).await.into_response();
@@ -66,6 +67,7 @@ async fn test_submit_comment() -> anyhow::Result<()> {
     let state = Arc::new(AppState { 
         root: dir.path().to_path_buf(),
         cache: Mutex::new(cache),
+        bug_locks: Mutex::new(HashMap::new()),
     });
 
     let req = CommentRequest {
@@ -102,6 +104,7 @@ async fn test_change_metadata() -> anyhow::Result<()> {
     let state = Arc::new(AppState { 
         root: dir.path().to_path_buf(),
         cache: Mutex::new(cache),
+        bug_locks: Mutex::new(HashMap::new()),
     });
 
     let req = MetadataChangeRequest {
@@ -146,6 +149,7 @@ async fn test_get_bug_state_endpoint() -> anyhow::Result<()> {
     let state = Arc::new(AppState { 
         root: dir.path().to_path_buf(),
         cache: Mutex::new(cache),
+        bug_locks: Mutex::new(HashMap::new()),
     });
 
     let response = get_bug_state(State(state), Path(200)).await.into_response();

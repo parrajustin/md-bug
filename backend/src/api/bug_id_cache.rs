@@ -1,11 +1,11 @@
-use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 /// Cache mapping bug IDs to their hierarchical component paths.
-#[derive(Archive, Deserialize, Serialize, Debug, Default)]
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default)]
+#[archive(check_bytes)]
 pub struct BugIdCache {
     /// Map of bug ID to list of components (folders).
     pub id_to_components: HashMap<u64, Vec<String>>,
@@ -19,8 +19,7 @@ impl BugIdCache {
         let mut cache = if cache_path.exists() {
             match fs::read(&cache_path) {
                 Ok(data) if !data.is_empty() => {
-                    let archived = unsafe { rkyv::archived_root::<BugIdCache>(&data) };
-                    archived.deserialize(&mut rkyv::Infallible).unwrap_or_default()
+                    rkyv::from_bytes::<BugIdCache>(&data).unwrap_or_default()
                 }
                 _ => Self::default(),
             }

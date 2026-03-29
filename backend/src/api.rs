@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -124,6 +125,16 @@ pub struct AppState {
     pub root: PathBuf,
     /// Cache mapping bug IDs to folder locations.
     pub cache: Mutex<BugIdCache>,
+    /// Per-bug locks to synchronize modifications.
+    pub bug_locks: Mutex<HashMap<u32, Arc<tokio::sync::Mutex<()>>>>,
+}
+
+impl AppState {
+    /// Gets or creates a mutex for a specific bug ID.
+    pub fn get_bug_lock(&self, id: u32) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.bug_locks.lock().unwrap_or_else(|e| e.into_inner());
+        locks.entry(id).or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))).clone()
+    }
 }
 
 /// Query parameters for searching bugs.
@@ -244,6 +255,8 @@ pub async fn submit_comment(
     Path(id): Path<u32>,
     Json(payload): Json<CommentRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    let lock = state.get_bug_lock(id);
+    let _guard = lock.lock().await;
     let bug_path = find_bug_path(&state, id)
         .ok_or(StatusCode::NOT_FOUND)?;
 
@@ -307,6 +320,8 @@ pub async fn change_metadata(
     Path(id): Path<u32>,
     Json(payload): Json<MetadataChangeRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    let lock = state.get_bug_lock(id);
+    let _guard = lock.lock().await;
     let bug_path = find_bug_path(&state, id)
         .ok_or(StatusCode::NOT_FOUND)?;
 

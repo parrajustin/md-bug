@@ -6,6 +6,7 @@ use axum::{
     Router,
 };
 use clap::Parser;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -60,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
     let shared_state = Arc::new(AppState {
         root: args.root.clone(),
         cache: Mutex::new(cache),
+        bug_locks: Mutex::new(HashMap::new()),
     });
 
     let app = Router::new()
