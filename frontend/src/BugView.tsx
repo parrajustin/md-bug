@@ -1,5 +1,5 @@
 import React from 'react';
-import { type Bug } from './api/fakeApi';
+import { type Bug } from './api/api';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { WrapToResult } from 'standard-ts-lib/src/wrap_to_result';

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fakeApi, type Bug } from './api/fakeApi';
+import { get_api, type Bug } from './api/api';
 import BugView from './BugView';
 import { type Result } from 'standard-ts-lib/src/result';
 import { StatusError } from 'standard-ts-lib/src/status_error';
@@ -13,11 +13,16 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (selectedBugId !== null) {
-      setLoading(true);
-      fakeApi.get_bug(selectedBugId).then((result) => {
-        setBugResult(result);
-        setLoading(false);
-      });
+      const apiResult = get_api();
+      if (apiResult.ok) {
+        setLoading(true);
+        apiResult.val.get_bug(selectedBugId).then((result) => {
+          setBugResult(result);
+          setLoading(false);
+        });
+      } else {
+        setBugResult(apiResult as any);
+      }
     }
   }, [selectedBugId]);
 
