@@ -7,12 +7,12 @@ import './styles.css';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'home' | 'bug'>('home');
-  const [selectedBugId, setSelectedBugId] = useState<string | null>(null);
+  const [selectedBugId, setSelectedBugId] = useState<number | null>(null);
   const [bugResult, setBugResult] = useState<Result<Bug, StatusError> | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
 
   useEffect(() => {
-    if (selectedBugId) {
+    if (selectedBugId !== null) {
       setLoading(true);
       fakeApi.get_bug(selectedBugId).then((result) => {
         setBugResult(result);
@@ -21,7 +21,7 @@ const App: React.FC = () => {
     }
   }, [selectedBugId]);
 
-  const handleBugClick = (id: string) => {
+  const handleBugClick = (id: number) => {
     setSelectedBugId(id);
     setView('bug');
   };
@@ -94,8 +94,8 @@ const App: React.FC = () => {
             <span style={{ fontSize: '24px' }}>+</span> Create Issue
           </button>
           <div className={`nav-item ${view === 'home' ? 'active' : ''}`} onClick={() => setView('home')}>Home</div>
-          <div className="nav-item" onClick={() => handleBugClick("423673307")}>Assigned to me</div>
-          <div className="nav-item" onClick={() => handleBugClick("999")}>Non-existent Bug</div>
+          <div className="nav-item" onClick={() => handleBugClick(423673307)}>Assigned to me</div>
+          <div className="nav-item" onClick={() => handleBugClick(999)}>Non-existent Bug (Error Test)</div>
           <div className="nav-item">Starred by me</div>
           <div className="nav-item">Upvoted by me</div>
           <div className="nav-item">CC'd to me</div>

@@ -10,7 +10,7 @@ declare const Temporal: any;
 interface BugViewProps {
   bug: Bug;
   onHome: () => void;
-  onRefresh: (id: string) => void;
+  onRefresh: (id: number) => void;
 }
 
 const BugView: React.FC<BugViewProps> = ({ bug, onHome, onRefresh }) => {
@@ -60,10 +60,10 @@ const BugView: React.FC<BugViewProps> = ({ bug, onHome, onRefresh }) => {
 
       <div className="bug-content-wrapper">
         <div className="bug-comments">
-          {bug.comments.map((comment, index) => (
-            <div key={index} className="comment-card">
+          {bug.comments.map((comment) => (
+            <div key={comment.id} className="comment-card">
               <div className="comment-header">
-                <strong>{comment.author}</strong> created issue · {formatTemporalDate(comment.epochNanoseconds)}
+                <strong>{comment.author}</strong> commented · {formatTemporalDate(comment.epochNanoseconds)} · #{comment.id}
               </div>
               <div dangerouslySetInnerHTML={renderMarkdown(comment.content)} />
             </div>
@@ -96,6 +96,18 @@ const BugView: React.FC<BugViewProps> = ({ bug, onHome, onRefresh }) => {
             <div className="metadata-label">Assignee</div>
             <div className="metadata-value">{bug.metadata.assignee}</div>
           </div>
+
+          {bug.metadata.userMetadata.length > 0 && (
+            <>
+              <h3>User Metadata</h3>
+              {bug.metadata.userMetadata.map((entry, idx) => (
+                <div className="metadata-item" key={idx}>
+                  <div className="metadata-label">{entry.key}</div>
+                  <div className="metadata-value">{entry.value}</div>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       </div>
     </div>
