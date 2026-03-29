@@ -63,6 +63,7 @@ md-bug/
 - **Security:** Always sanitize markdown output on the frontend using `dompurify`.
 - **Utilities:** Prefer using the utility functions and patterns defined in the [Standard TS Lib](../standard-ts-lib/GEMINI.md). Always use absolute package imports (e.g., `import { ... } from 'standard-ts-lib/src/...'`) instead of relative paths for these utilities.
 - **Verification:** Always verify changes to the `frontend` directory by ensuring that `npm run build` passes within the `md-bug/frontend` folder.
+- **Rust Testing:** Always keep tests in separate files (e.g., `api_test.rs`) rather than in the same file as the implementation. Use `#[cfg(test)] mod <test_file>;` to include them.
 
 ## Conventions & Style
 

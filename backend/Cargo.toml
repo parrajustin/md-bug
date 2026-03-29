@@ -1,0 +1,20 @@
+[package]
+name = "md-bug-backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.7.5"
+tokio = { version = "1.37.0", features = ["full"] }
+serde = { version = "1.0.201", features = ["derive"] }
+serde_json = "1.0.117"
+rkyv = { version = "0.7.44", features = ["validation"] }
+tower-http = { version = "0.5.2", features = ["fs", "cors"] }
+clap = { version = "4.5.4", features = ["derive"] }
+walkdir = "2.5.0"
+chrono = "0.4.38"
+anyhow = "1.0.83"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
+bytecheck = "0.6.12"
+tempfile = "3.10.1"
