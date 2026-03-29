@@ -15,8 +15,8 @@ interface BugViewProps {
 
 const BugView: React.FC<BugViewProps> = ({ bug, onHome, onRefresh }) => {
   const renderMarkdown = (content: string) => {
-    const rawHtml = marked(content);
-    return { __html: DOMPurify.sanitize(rawHtml as string) };
+    const rawHtml = marked.parse(content) as string;
+    return { __html: DOMPurify.sanitize(rawHtml, { RETURN_TRUSTED_TYPE: true }) as unknown as string };
   };
 
   const formatTemporalDate = (nanos: bigint) => {
@@ -60,7 +60,15 @@ const BugView: React.FC<BugViewProps> = ({ bug, onHome, onRefresh }) => {
 
       <div className="bug-content-wrapper">
         <div className="bug-comments">
+          <div className="comment-card description-card">
+            <div className="comment-header">
+              <strong>{bug.metadata.reporter}</strong> created the issue · {formatTemporalDate(bug.metadata.createdAt)}
+            </div>
+            <div className="description-content" dangerouslySetInnerHTML={renderMarkdown(bug.metadata.description)} />
+          </div>
+
           {bug.comments.map((comment) => (
+
             <div key={comment.id} className="comment-card">
               <div className="comment-header">
                 <strong>{comment.author}</strong> commented · {formatTemporalDate(comment.epochNanoseconds)} · #{comment.id}

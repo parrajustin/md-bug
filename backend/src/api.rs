@@ -48,6 +48,8 @@ pub struct BugMetadata {
     pub title: String,
     /// Hierarchical components/folders the bug belongs to.
     pub folders: Vec<String>,
+    /// Markdown-formatted description of the bug.
+    pub description: String,
     /// Additional user-defined metadata entries.
     pub user_metadata: Vec<UserMetadataEntry>,
     /// Creation timestamp in epoch nanoseconds.

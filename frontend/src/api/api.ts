@@ -25,6 +25,7 @@ export interface BugMetadata {
   assignee: string;
   title: string;
   folders: string[];
+  description: string;
   userMetadata: UserMetadataEntry[];
   createdAt: bigint;
 }

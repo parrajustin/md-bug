@@ -69,6 +69,7 @@ pub fn generate_fake_data(root: &Path) {
             assignee: SafeEmail().fake(),
             title: Sentence(3..8).fake(),
             folders,
+            description: Paragraph(1..5).fake(),
             user_metadata: vec![],
             created_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0),
         };

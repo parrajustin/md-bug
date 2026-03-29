@@ -27,6 +27,7 @@ fn create_test_bug(root: &StdPath, id: u32, folders: Vec<String>) -> anyhow::Res
         assignee: "none".to_string(),
         title: format!("Test Bug {}", id),
         folders,
+        description: "Test bug description".to_string(),
         user_metadata: vec![],
         created_at: 123456789,
     };

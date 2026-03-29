@@ -272,3 +272,10 @@ pre {
 .bug-title-col {
   flex-grow: 1;
 }
+
+/* Description Card Styles */
+.description-card {
+  border-left: 4px solid var(--accent-color);
+  background-color: #1a1a1a;
+  margin-bottom: 24px;
+}
