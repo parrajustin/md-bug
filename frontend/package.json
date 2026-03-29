@@ -4,7 +4,8 @@
   "description": "Markdown bug viewer frontend",
   "main": "index.js",
   "scripts": {
-    "build": "esbuild src/index.tsx --bundle --outfile=public/bundle.js --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css --minify",
+    "build": "esbuild src/index.tsx --bundle --outfile=public/bundle.js --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css --minify --define:USE_FAKE_API=false",
+    "fakeapi-build": "esbuild src/index.tsx --bundle --outfile=public/bundle.js --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css --minify --define:USE_FAKE_API=true",
     "serve": "npx serve public"
   },
   "dependencies": {

@@ -207,3 +207,68 @@ pre {
   border-radius: 4px;
   overflow-x: auto;
 }
+
+/* Home View Card Styles */
+.card {
+  background-color: #1a1a1a;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+.card-header {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.card-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: white;
+}
+
+.bug-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.bug-list-header, .bug-list-row {
+  display: flex;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border-color);
+  align-items: center;
+}
+
+.bug-list-header {
+  background-color: #262626;
+  font-weight: bold;
+  font-size: 0.9rem;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.bug-list-row {
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.bug-list-row:hover {
+  background-color: var(--hover-bg);
+}
+
+.bug-list-row:last-child {
+  border-bottom: none;
+}
+
+.bug-id-col {
+  width: 120px;
+  flex-shrink: 0;
+  font-family: monospace;
+  color: var(--accent-color);
+}
+
+.bug-title-col {
+  flex-grow: 1;
+}

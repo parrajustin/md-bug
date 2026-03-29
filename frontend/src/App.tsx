@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { get_api, type Bug } from './api/api';
 import BugView from './BugView';
+import HomeView from './HomeView';
 import { type Result } from 'standard-ts-lib/src/result';
 import { StatusError } from 'standard-ts-lib/src/status_error';
 import './styles.css';
@@ -34,15 +35,7 @@ const App: React.FC = () => {
   const renderContent = () => {
     if (view === 'home') {
       return (
-        <div className="placeholder-view">
-          <svg className="placeholder-img" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-          </svg>
-          <h2>No issues selected</h2>
-          <p>Select an issue from the sidebar or search to get started.</p>
-        </div>
+        <HomeView onBugSelect={handleBugClick} />
       );
     }
 

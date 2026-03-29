@@ -1,6 +1,13 @@
 import { type Result, Ok } from 'standard-ts-lib/src/result';
+import { Some, None, type Optional } from "standard-ts-lib/src/optional";
 import { StatusError } from 'standard-ts-lib/src/status_error';
 import { BackendApi } from './backend_api';
+import { FakeApi } from './fake_api';
+
+declare const USE_FAKE_API: boolean;
+
+// Default value if not defined by esbuild
+const use_fake = typeof USE_FAKE_API !== 'undefined' ? USE_FAKE_API : false;
 
 export interface UserMetadataEntry {
   key: string;
@@ -49,15 +56,19 @@ export interface API {
   change_metadata(id: number, field: string, value: string): Promise<Result<void, StatusError>>;
 }
 
-let api_singleton: API | undefined = undefined;
+let api_singleton: Optional<API> = None;
 
 export function get_api(): Result<API, StatusError> {
-  if (!api_singleton) {
-    api_singleton = new BackendApi();
+  if (api_singleton.none) {
+    if (use_fake) {
+      api_singleton = Some(new FakeApi());
+    } else {
+      api_singleton = Some(new BackendApi());
+    }
   }
-  return Ok(api_singleton);
+  return Ok(api_singleton.safeValue());
 }
 
 export function inject_api(api: API): void {
-  api_singleton = api;
+  api_singleton = Some(api);
 }
