@@ -1,3 +1,6 @@
+import { type Result, Ok, Err } from 'standard-ts-lib/src/result';
+import { StatusError, NotFoundError } from 'standard-ts-lib/src/status_error';
+
 export interface BugMetadata {
   reporter: string;
   type: string;
@@ -19,6 +22,11 @@ export interface Bug {
   folders: string[];
   metadata: BugMetadata;
   comments: Comment[];
+}
+
+export interface BugSummary {
+  id: string;
+  title: string;
 }
 
 const mockBugs: Bug[] = [
@@ -59,10 +67,14 @@ Execution failed for task ':app:kspDebugAndroidTestKotlin'.
 ];
 
 export const fakeApi = {
-  get_bug_list: async () => {
-    return mockBugs.map(b => ({ id: b.id, title: b.title }));
+  get_bug_list: async (): Promise<Result<BugSummary[], StatusError>> => {
+    return Ok(mockBugs.map(b => ({ id: b.id, title: b.title })));
   },
-  get_bug: async (id: string) => {
-    return mockBugs.find(b => b.id === id) || null;
+  get_bug: async (id: string): Promise<Result<Bug, StatusError>> => {
+    const bug = mockBugs.find(b => b.id === id);
+    if (bug) {
+      return Ok(bug);
+    }
+    return Err(NotFoundError(`Bug with id ${id} not found`));
   }
 };
