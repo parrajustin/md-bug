@@ -1,7 +1,11 @@
 import React from 'react';
-import type { Bug } from './api/fakeApi';
+import { type Bug } from './api/fakeApi';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { WrapToResult } from 'standard-ts-lib/src/wrap_to_result';
+
+// Declare Temporal globally if it's not yet in the TypeScript definitions
+declare const Temporal: any;
 
 interface BugViewProps {
   bug: Bug;
@@ -13,6 +17,31 @@ const BugView: React.FC<BugViewProps> = ({ bug, onHome, onRefresh }) => {
   const renderMarkdown = (content: string) => {
     const rawHtml = marked(content);
     return { __html: DOMPurify.sanitize(rawHtml as string) };
+  };
+
+  const formatTemporalDate = (nanos: bigint) => {
+    const result = WrapToResult(
+      () => {
+        const instant = Temporal.Instant.fromEpochNanoseconds(nanos);
+        // Use Intl.DateTimeFormat for custom formatting
+        return new Intl.DateTimeFormat('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        }).format(instant);
+      },
+      'Failed to format temporal date'
+    );
+
+    if (result.ok) {
+      return result.val;
+    } else {
+      console.error(result.val.toString());
+      return nanos.toString();
+    }
   };
 
   return (
@@ -34,7 +63,7 @@ const BugView: React.FC<BugViewProps> = ({ bug, onHome, onRefresh }) => {
           {bug.comments.map((comment, index) => (
             <div key={index} className="comment-card">
               <div className="comment-header">
-                <strong>{comment.author}</strong> created issue · {comment.date}
+                <strong>{comment.author}</strong> created issue · {formatTemporalDate(comment.epochNanoseconds)}
               </div>
               <div dangerouslySetInnerHTML={renderMarkdown(comment.content)} />
             </div>

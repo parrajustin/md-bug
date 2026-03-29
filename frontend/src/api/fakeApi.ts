@@ -12,7 +12,7 @@ export interface BugMetadata {
 
 export interface Comment {
   author: string;
-  date: string;
+  epochNanoseconds: bigint;
   content: string;
 }
 
@@ -45,7 +45,7 @@ const mockBugs: Bug[] = [
     comments: [
       {
         author: "ch...@kivra.com",
-        date: "Jun 10, 2025 12:00AM",
+        epochNanoseconds: 1718016000000000000n, // Jun 10, 2024 12:00AM
         content: `### DESCRIPTION
 1. Describe the bug or issue that you're seeing.
 Compiling androidTest fails when upgrading from 8.11.x to 8.12 or higher. Same failure in both Android Studio and my terminal command.
@@ -59,8 +59,13 @@ Execution failed for task ':app:kspDebugAndroidTestKotlin'.
       },
       {
         author: "an...@google.com",
-        date: "Jun 11, 2025 10:00AM",
+        epochNanoseconds: 1718100000000000000n, // Jun 11, 2024 10:00AM
         content: "We are looking into this. It seems like a dependency resolution issue with the new Gradle version."
+      },
+      {
+        author: "abigale@google.com",
+        epochNanoseconds: 1718103600000000000n, // Jun 11, 2024 11:00AM
+        content: "kk, looks good."
       }
     ]
   }
