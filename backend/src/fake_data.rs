@@ -5,7 +5,7 @@ use fake::Fake;
 use fake::faker::lorem::en::{Sentence, Paragraph};
 use fake::faker::internet::en::SafeEmail;
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::api::{BugMetadata, Comment};
+use crate::api::{BugMetadata, Comment, CURRENT_VERSION};
 use walkdir::WalkDir;
 
 pub fn generate_fake_data(root: &Path) {
@@ -60,6 +60,7 @@ pub fn generate_fake_data(root: &Path) {
         }
 
         let metadata = BugMetadata {
+            version: CURRENT_VERSION,
             id: bug_id,
             reporter: SafeEmail().fake(),
             bug_type: types[rng.gen_range(0..types.len())].to_string(),
@@ -82,6 +83,7 @@ pub fn generate_fake_data(root: &Path) {
         let num_comments = rng.gen_range(0..5);
         for c_id in 1..=num_comments {
             let comment = Comment {
+                version: CURRENT_VERSION,
                 id: c_id as u32,
                 author: SafeEmail().fake(),
                 epoch_nanoseconds: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0),

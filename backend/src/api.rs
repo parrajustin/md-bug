@@ -13,10 +13,18 @@ use walkdir::WalkDir;
 pub mod bug_id_cache;
 use bug_id_cache::BugIdCache;
 
+pub const CURRENT_VERSION: u32 = 1;
+
+/// Trait for types that support versioning.
+pub trait HasVersion {
+    fn get_version(&self) -> u32;
+}
+
 /// Represents a single user-defined metadata entry.
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
 #[archive(check_bytes)]
 pub struct UserMetadataEntry {
+    pub version: u32,
     /// The key/name of the metadata field.
     pub key: String,
     /// The value of the metadata field.
@@ -26,10 +34,17 @@ pub struct UserMetadataEntry {
     pub entry_type: String,
 }
 
+impl HasVersion for UserMetadataEntry {
+    fn get_version(&self) -> u32 {
+        self.version
+    }
+}
+
 /// Contains all the core metadata for a bug.
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
 #[archive(check_bytes)]
 pub struct BugMetadata {
+    pub version: u32,
     /// Unique numeric ID of the bug.
     pub id: u32,
     /// The user who reported the bug.
@@ -59,10 +74,17 @@ pub struct BugMetadata {
     pub state_id: u64,
 }
 
+impl HasVersion for BugMetadata {
+    fn get_version(&self) -> u32 {
+        self.version
+    }
+}
+
 /// Represents a comment left on a bug.
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
 #[archive(check_bytes)]
 pub struct Comment {
+    pub version: u32,
     /// Sequential ID of the comment within the bug.
     pub id: u32,
     /// The user who authored the comment.
@@ -71,6 +93,12 @@ pub struct Comment {
     pub epoch_nanoseconds: u64,
     /// Markdown-formatted content of the comment.
     pub content: String,
+}
+
+impl HasVersion for Comment {
+    fn get_version(&self) -> u32 {
+        self.version
+    }
 }
 
 /// A complete bug object including its metadata and history.
@@ -124,7 +152,7 @@ pub async fn get_bug_list(
             Err(_) => continue,
         };
         
-        let metadata: BugMetadata = match rkyv::from_bytes::<BugMetadata>(&data) {
+        let metadata: BugMetadata = match read_versioned::<BugMetadata>(&data) {
             Ok(m) => m,
             Err(_) => continue,
         };
@@ -160,7 +188,7 @@ pub async fn get_bug(
 
     let metadata_data = fs::read(bug_path.join("metadata"))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let metadata: BugMetadata = rkyv::from_bytes::<BugMetadata>(&metadata_data)
+    let metadata: BugMetadata = read_versioned::<BugMetadata>(&metadata_data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let mut comments = Vec::new();
@@ -169,7 +197,7 @@ pub async fn get_bug(
             let name = entry.file_name().into_string().unwrap_or_default();
             if name.starts_with("comment_") {
                 if let Ok(data) = fs::read(entry.path()) {
-                    let comment: Comment = rkyv::from_bytes::<Comment>(&data)
+                    let comment: Comment = read_versioned::<Comment>(&data)
                         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
                     comments.push(comment);
                 }
@@ -197,7 +225,7 @@ pub async fn get_bug_state(
 
     let metadata_data = fs::read(bug_path.join("metadata"))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let metadata: BugMetadata = rkyv::from_bytes::<BugMetadata>(&metadata_data)
+    let metadata: BugMetadata = read_versioned::<BugMetadata>(&metadata_data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(metadata.state_id))
@@ -222,7 +250,7 @@ pub async fn submit_comment(
     let metadata_file = bug_path.join("metadata");
     let data = fs::read(&metadata_file)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut metadata: BugMetadata = rkyv::from_bytes::<BugMetadata>(&data)
+    let mut metadata: BugMetadata = read_versioned::<BugMetadata>(&data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     metadata.state_id += 1;
@@ -250,6 +278,7 @@ pub async fn submit_comment(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let comment = Comment {
+        version: CURRENT_VERSION,
         id: next_comment_id,
         author: payload.author,
         epoch_nanoseconds: now.as_nanos() as u64,
@@ -284,7 +313,7 @@ pub async fn change_metadata(
     let metadata_file = bug_path.join("metadata");
     let data = fs::read(&metadata_file)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut metadata: BugMetadata = rkyv::from_bytes::<BugMetadata>(&data)
+    let mut metadata: BugMetadata = read_versioned::<BugMetadata>(&data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     match payload.field.as_str() {
@@ -298,6 +327,7 @@ pub async fn change_metadata(
                 entry.value = payload.value;
             } else {
                 metadata.user_metadata.push(UserMetadataEntry {
+                    version: CURRENT_VERSION,
                     key: payload.field,
                     value: payload.value,
                     entry_type: "string".to_string(),
@@ -320,6 +350,24 @@ pub async fn change_metadata(
 pub fn find_bug_path(state: &AppState, id: u32) -> Option<PathBuf> {
     let cache = state.cache.lock().ok()?;
     cache.get_path(&state.root, id as u64)
+}
+
+/// Safely reads versioned rkyv data.
+/// For now, it simply performs full safe deserialization and verifies the version.
+/// This can be expanded in the future to handle complex schema migrations.
+pub fn read_versioned<T>(data: &[u8]) -> Result<T, String>
+where
+    T: rkyv::Archive + HasVersion,
+    T::Archived: for<'a> rkyv::CheckBytes<rkyv::validation::validators::DefaultValidator<'a>> + rkyv::Deserialize<T, rkyv::de::deserializers::SharedDeserializeMap>,
+{
+    let val: T = rkyv::from_bytes::<T>(data).map_err(|e| format!("Rkyv deserialization error: {:?}", e))?;
+    
+    if val.get_version() != CURRENT_VERSION {
+        // Migration logic would go here if we had multiple versions.
+        // If the schema is backward compatible, val might already be usable.
+    }
+
+    Ok(val)
 }
 
 #[cfg(test)]

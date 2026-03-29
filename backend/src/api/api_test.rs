@@ -18,6 +18,7 @@ fn create_test_bug(root: &StdPath, id: u32, folders: Vec<String>) -> anyhow::Res
     fs::create_dir_all(&bug_path)?;
 
     let metadata = BugMetadata {
+        version: CURRENT_VERSION,
         id,
         reporter: "test@example.com".to_string(),
         bug_type: "Bug".to_string(),
