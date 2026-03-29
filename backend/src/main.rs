@@ -1,4 +1,5 @@
 mod api;
+mod fake_data;
 
 use axum::{
     routing::{get, post},
@@ -23,6 +24,9 @@ struct Args {
     /// Directory containing frontend static files.
     #[arg(short, long, default_value = "../frontend/public")]
     frontend_dir: PathBuf,
+    /// Whether to generate fake data upon startup.
+    #[arg(long, default_value = "false")]
+    fake_data: bool,
 }
 
 #[tokio::main]
@@ -34,11 +38,20 @@ async fn main() -> anyhow::Result<()> {
     if !args.root.exists() {
         fs::create_dir_all(&args.root)?;
     }
+    println!("Root directory: {:?}", args.root);
+    println!("Frontend directory: {:?}", args.frontend_dir);
+    println!("Port: {:?}", args.port);
 
     // Ensure the "default" directory exists within the root.
     let default_dir = args.root.join("default");
     if !default_dir.exists() {
         fs::create_dir_all(&default_dir)?;
+    }
+
+    // Generate fake data if the flag is set.
+    println!("fake data value: {}", args.fake_data);
+    if args.fake_data {
+        fake_data::generate_fake_data(&args.root);
     }
 
     // Load and update the bug ID cache.

@@ -27,6 +27,7 @@ The following flags are available when running the backend:
 | `--root` | `-r` | (Required) | The base directory where all bug components and data are stored. |
 | `--port` | `-p` | `8080` | The port the HTTP server will listen on. |
 | `--frontend-dir` | `-f` | `../frontend/public` | The directory containing the static frontend files (HTML, JS, CSS). |
+| `--fake-data` | | `false` | If set, generates a random set of fake bugs and components on startup. |
 
 ### Example
 
