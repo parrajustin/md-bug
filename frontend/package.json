@@ -1,0 +1,26 @@
+{
+  "name": "md-bug-frontend",
+  "version": "1.0.0",
+  "description": "Markdown bug viewer frontend",
+  "main": "index.js",
+  "scripts": {
+    "build": "esbuild src/index.tsx --bundle --outfile=public/bundle.js --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css --minify",
+    "serve": "npx serve public"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "marked": "^11.1.1",
+    "dompurify": "^3.0.8",
+    "jsdom": "^24.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.1",
+    "typescript": "^5.3.3",
+    "@types/react": "^18.2.55",
+    "@types/react-dom": "^18.2.19",
+    "@types/marked": "^5.0.2",
+    "@types/dompurify": "^3.0.5",
+    "@types/jsdom": "^21.1.6"
+  }
+}
