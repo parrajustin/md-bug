@@ -65,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/api/bug_list", get(api::get_bug_list))
         .route("/api/bug/:id", get(api::get_bug))
+        .route("/api/bug/:id/state", get(api::get_bug_state))
         .route("/api/bug/:id/comment", post(api::submit_comment))
         .route("/api/bug/:id/metadata", post(api::change_metadata))
         .fallback_service(ServeDir::new(args.frontend_dir))

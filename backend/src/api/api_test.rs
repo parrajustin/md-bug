@@ -30,6 +30,7 @@ fn create_test_bug(root: &StdPath, id: u32, folders: Vec<String>) -> anyhow::Res
         description: "Test bug description".to_string(),
         user_metadata: vec![],
         created_at: 123456789,
+        state_id: 1,
     };
 
     let bytes = rkyv::to_bytes::<_, 1024>(&metadata)
@@ -71,16 +72,20 @@ async fn test_submit_comment() -> anyhow::Result<()> {
         content: "Hello world".to_string(),
     };
 
-    let response = submit_comment(State(state), Path(42), Json(req)).await.into_response();
-    assert_eq!(response.status(), StatusCode::CREATED);
+    let response = submit_comment(State(state.clone()), Path(42), Json(req)).await.into_response();
+    assert_eq!(response.status(), StatusCode::OK);
 
     let bug_path = dir.path().join("test").join("42");
+    let data = fs::read(bug_path.join("metadata"))?;
+    let metadata: BugMetadata = rkyv::from_bytes::<BugMetadata>(&data)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    assert_eq!(metadata.state_id, 2);
+
     let comment_file = bug_path.join("comment_0000001");
     assert!(comment_file.exists());
 
     let data = fs::read(comment_file)?;
-    let archived = unsafe { rkyv::archived_root::<Comment>(&data) };
-    let comment: Comment = archived.deserialize(&mut rkyv::Infallible)
+    let comment: Comment = rkyv::from_bytes::<Comment>(&data)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     assert_eq!(comment.author, "alice");
     assert_eq!(comment.content, "Hello world");
@@ -108,10 +113,10 @@ async fn test_change_metadata() -> anyhow::Result<()> {
 
     let bug_path = dir.path().join("meta").join("100");
     let data = fs::read(bug_path.join("metadata"))?;
-    let archived = unsafe { rkyv::archived_root::<BugMetadata>(&data) };
-    let metadata: BugMetadata = archived.deserialize(&mut rkyv::Infallible)
+    let metadata: BugMetadata = rkyv::from_bytes::<BugMetadata>(&data)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     assert_eq!(metadata.status, "In Progress");
+    assert_eq!(metadata.state_id, 2);
 
     // Test user metadata
     let req_user = MetadataChangeRequest {
@@ -122,11 +127,27 @@ async fn test_change_metadata() -> anyhow::Result<()> {
     assert_eq!(response.status(), StatusCode::OK);
 
     let data = fs::read(bug_path.join("metadata"))?;
-    let archived = unsafe { rkyv::archived_root::<BugMetadata>(&data) };
-    let metadata: BugMetadata = archived.deserialize(&mut rkyv::Infallible)
+    let metadata: BugMetadata = rkyv::from_bytes::<BugMetadata>(&data)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    assert_eq!(metadata.state_id, 3);
     let team = metadata.user_metadata.iter().find(|m| m.key == "Team")
         .ok_or_else(|| anyhow::anyhow!("Team metadata not found"))?;
     assert_eq!(team.value, "Perception");
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_get_bug_state_endpoint() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    create_test_bug(dir.path(), 200, vec!["state".to_string()])?;
+    
+    let cache = BugIdCache::load_and_update(dir.path());
+    let state = Arc::new(AppState { 
+        root: dir.path().to_path_buf(),
+        cache: Mutex::new(cache),
+    });
+
+    let response = get_bug_state(State(state), Path(200)).await.into_response();
+    assert_eq!(response.status(), StatusCode::OK);
     Ok(())
 }
