@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 use crate::api::AppState;
 use crate::api::bug_id_cache::BugIdCache;
 
@@ -64,13 +64,18 @@ async fn main() -> anyhow::Result<()> {
         bug_locks: Mutex::new(HashMap::new()),
     });
 
+    let index_file = args.frontend_dir.join("index.html");
+
     let app = Router::new()
         .route("/api/bug_list", get(api::get_bug_list))
         .route("/api/bug/:id", get(api::get_bug))
         .route("/api/bug/:id/state", get(api::get_bug_state))
         .route("/api/bug/:id/comment", post(api::submit_comment))
         .route("/api/bug/:id/metadata", post(api::change_metadata))
-        .fallback_service(ServeDir::new(args.frontend_dir))
+        .fallback_service(
+            ServeDir::new(&args.frontend_dir)
+                .not_found_service(ServeFile::new(index_file))
+        )
         .with_state(shared_state);
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port)).await?;
