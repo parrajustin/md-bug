@@ -55,6 +55,15 @@ async fn test_create_and_get_bug() -> anyhow::Result<()> {
 
     let response = get_bug(State(state.clone()), Path(1)).await.into_response();
     assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024).await?;
+    let json: serde_json::Value = serde_json::from_slice(&body)?;
+
+    // Verify custom serialization for u64 and presence of state_id
+    assert_eq!(json["state_id"], "1n");
+    assert_eq!(json["metadata"]["created_at"], "123456789n");
+    assert_eq!(json["metadata"]["state_id"], "1n");
+    
     Ok(())
 }
 
@@ -78,9 +87,12 @@ async fn test_submit_comment() -> anyhow::Result<()> {
     let response = submit_comment(State(state.clone()), Path(42), Json(req)).await.into_response();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Verify response body
-    // We'll skip deep body inspection for now as it requires complex deserialization in tests, 
-    // but we'll verify the side effects which confirm the logic.
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024).await?;
+    let json: serde_json::Value = serde_json::from_slice(&body)?;
+    
+    // Verify response contains new state_id in correct format
+    assert_eq!(json["state_id"], "2n");
+    assert_eq!(json["comment_id"], 1);
 
     let bug_path = dir.path().join("test").join("42");
     let data = fs::read(bug_path.join("metadata"))?;
@@ -118,6 +130,12 @@ async fn test_change_metadata() -> anyhow::Result<()> {
 
     let response = change_metadata(State(state.clone()), Path(100), Json(req)).await.into_response();
     assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024).await?;
+    let json: serde_json::Value = serde_json::from_slice(&body)?;
+    
+    // Verify response contains new state_id in correct format
+    assert_eq!(json["state_id"], "2n");
 
     let bug_path = dir.path().join("meta").join("100");
     let data = fs::read(bug_path.join("metadata"))?;
@@ -158,5 +176,12 @@ async fn test_get_bug_state_endpoint() -> anyhow::Result<()> {
 
     let response = get_bug_state(State(state), Path(200)).await.into_response();
     assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024).await?;
+    let json: serde_json::Value = serde_json::from_slice(&body)?;
+    
+    // Verify get_bug_state returns raw state_id with "n" format
+    assert_eq!(json, "1n");
+
     Ok(())
 }

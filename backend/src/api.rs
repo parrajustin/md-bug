@@ -16,6 +16,14 @@ use bug_id_cache::BugIdCache;
 
 pub const CURRENT_VERSION: u32 = 1;
 
+/// Custom serializer for u64 to represent them as strings with an "n" suffix in JSON.
+fn serialize_u64_as_string_n<S>(val: &u64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&format!("{}n", val))
+}
+
 /// Trait for types that support versioning.
 pub trait HasVersion {
     fn get_version(&self) -> u32;
@@ -70,8 +78,10 @@ pub struct BugMetadata {
     /// Additional user-defined metadata entries.
     pub user_metadata: Vec<UserMetadataEntry>,
     /// Creation timestamp in epoch nanoseconds.
+    #[serde(serialize_with = "serialize_u64_as_string_n")]
     pub created_at: u64,
     /// Incremental ID representing the state of the bug.
+    #[serde(serialize_with = "serialize_u64_as_string_n")]
     pub state_id: u64,
 }
 
@@ -91,6 +101,7 @@ pub struct Comment {
     /// The user who authored the comment.
     pub author: String,
     /// Timestamp when the server received the comment.
+    #[serde(serialize_with = "serialize_u64_as_string_n")]
     pub epoch_nanoseconds: u64,
     /// Markdown-formatted content of the comment.
     pub content: String,
@@ -110,6 +121,8 @@ pub struct Bug {
     pub folders: Vec<String>,
     pub metadata: BugMetadata,
     pub comments: Vec<Comment>,
+    #[serde(serialize_with = "serialize_u64_as_string_n")]
+    pub state_id: u64,
 }
 
 /// A brief summary of a bug for list views.
@@ -221,6 +234,7 @@ pub async fn get_bug(
         id: metadata.id,
         title: metadata.title.clone(),
         folders: metadata.folders.clone(),
+        state_id: metadata.state_id,
         metadata,
         comments,
     }))
@@ -239,7 +253,7 @@ pub async fn get_bug_state(
     let metadata: BugMetadata = read_versioned::<BugMetadata>(&metadata_data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(Json(metadata.state_id))
+    Ok(Json(format!("{}n", metadata.state_id)))
 }
 
 /// Request payload for submitting a new comment.
@@ -253,6 +267,7 @@ pub struct CommentRequest {
 #[derive(SerdeSerialize)]
 pub struct SubmitCommentResponse {
     pub comment_id: u32,
+    #[serde(serialize_with = "serialize_u64_as_string_n")]
     pub state_id: u64,
 }
 
@@ -327,6 +342,7 @@ pub struct MetadataChangeRequest {
 /// Response payload for changing bug metadata.
 #[derive(SerdeSerialize)]
 pub struct ChangeMetadataResponse {
+    #[serde(serialize_with = "serialize_u64_as_string_n")]
     pub state_id: u64,
 }
 
