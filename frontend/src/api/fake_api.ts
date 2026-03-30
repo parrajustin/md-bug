@@ -9,6 +9,7 @@ export class FakeApi implements API {
       title: "Bumping gradle from 8.11.x to higher major versions causes androidTest compile failures",
       folders: ["Android Public Tracker", "App Development", "Jetpack (androidx)"],
       metadata: {
+        version: 1,
         id: 423673307,
         reporter: "ch...@kivra.com",
         type: "Bug",
@@ -19,21 +20,23 @@ export class FakeApi implements API {
         title: "Bumping gradle from 8.11.x to higher major versions causes androidTest compile failures",
         folders: ["Android Public Tracker", "App Development", "Jetpack (androidx)"],
         description: "Compiling androidTest fails when upgrading from 8.11.x to 8.12 or higher. This seems to be related to the new dependency resolution engine.",
-        userMetadata: [
-          { key: "Hotlist", value: "AndroidGradlePlugin", type: "string" },
-          { key: "Component ID", value: "192731", type: "string" }
+        user_metadata: [
+          { version: 1, key: "Hotlist", value: "AndroidGradlePlugin", type: "string" },
+          { version: 1, key: "Component ID", value: "192731", type: "string" }
         ],
-        createdAt: 1718016000000000000n,
-        stateId: 1n
+        created_at: 1718016000000000000n,
+        state_id: 1n
       },
       comments: [
         {
+          version: 1,
           id: 1,
           author: "ch...@kivra.com",
-          epochNanoseconds: 1718016000000000000n,
+          epoch_nanoseconds: 1718016000000000000n,
           content: "Compiling androidTest fails when upgrading from 8.11.x to 8.12 or higher."
         }
-      ]
+      ],
+      state_id: 1n
     }
   ];
 
@@ -49,7 +52,8 @@ export class FakeApi implements API {
   async get_bug(id: number): Promise<Result<Bug, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
-    if (bug.metadata.stateId === undefined) bug.metadata.stateId = 1n;
+    if (bug.metadata.state_id === undefined) bug.metadata.state_id = 1n;
+    bug.state_id = bug.metadata.state_id;
     return Ok(bug);
   }
 
@@ -57,33 +61,37 @@ export class FakeApi implements API {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
     const newId = bug.comments.length + 1;
-    bug.metadata.stateId = (bug.metadata.stateId || 1n) + 1n;
+    bug.metadata.state_id = (bug.metadata.state_id || 1n) + 1n;
+    bug.state_id = bug.metadata.state_id;
     bug.comments.push({
+      version: 1,
       id: newId,
       author,
       content,
-      epochNanoseconds: BigInt(Date.now()) * 1000000n
+      epoch_nanoseconds: BigInt(Date.now()) * 1000000n
     });
     return Ok({
-      commentId: newId,
-      stateId: bug.metadata.stateId
+      comment_id: newId,
+      state_id: bug.metadata.state_id
     });
   }
 
   async change_metadata(id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
-    bug.metadata.stateId = (bug.metadata.stateId || 1n) + 1n;
+    bug.metadata.state_id = (bug.metadata.state_id || 1n) + 1n;
+    bug.state_id = bug.metadata.state_id;
+    
     const m = bug.metadata as any;
     if (field in m) {
       m[field] = value;
     } else {
-      const entry = bug.metadata.userMetadata.find(e => e.key === field);
+      const entry = bug.metadata.user_metadata.find(e => e.key === field);
       if (entry) entry.value = value;
-      else bug.metadata.userMetadata.push({ key: field, value, type: 'string' });
+      else bug.metadata.user_metadata.push({ version: 1, key: field, value, type: 'string' });
     }
     return Ok({
-      stateId: bug.metadata.stateId
+      state_id: bug.metadata.state_id
     });
   }
 }

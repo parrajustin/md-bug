@@ -63,17 +63,19 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh })
     const result = await apiResult.val.submit_comment(bug.id, 'current_user', commentText);
     
     if (result.ok) {
-      const newCommentId = result.val;
+      const response = result.val;
       const newComment: Comment = {
-        id: newCommentId,
+        version: 1, // Current version
+        id: response.comment_id,
         author: 'current_user',
-        epochNanoseconds: BigInt(Date.now()) * 1000000n,
+        epoch_nanoseconds: BigInt(Date.now()) * 1000000n,
         content: commentText,
       };
 
       setBug({
         ...bug,
         comments: [...bug.comments, newComment],
+        state_id: response.state_id,
       });
       setCommentText('');
     } else {
@@ -100,7 +102,7 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh })
         <div className="bug-comments">
           <div className="comment-card description-card">
             <div className="comment-header">
-              <strong>{bug.metadata.reporter}</strong> created the issue · {formatTemporalDate(bug.metadata.createdAt)}
+              <strong>{bug.metadata.reporter}</strong> created the issue · {formatTemporalDate(bug.metadata.created_at)}
             </div>
             <div className="description-content" dangerouslySetInnerHTML={renderMarkdown(bug.metadata.description)} />
           </div>
@@ -108,7 +110,7 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh })
           {bug.comments.map((comment) => (
             <div key={comment.id} className="comment-card">
               <div className="comment-header">
-                <strong>{comment.author}</strong> commented · {formatTemporalDate(comment.epochNanoseconds)} · #{comment.id}
+                <strong>{comment.author}</strong> commented · {formatTemporalDate(comment.epoch_nanoseconds)} · #{comment.id}
               </div>
               <div dangerouslySetInnerHTML={renderMarkdown(comment.content)} />
             </div>
@@ -184,10 +186,10 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh })
             <div className="metadata-value">{bug.metadata.assignee}</div>
           </div>
 
-          {bug.metadata.userMetadata.length > 0 && (
+          {bug.metadata.user_metadata.length > 0 && (
             <>
               <h3>User Metadata</h3>
-              {bug.metadata.userMetadata.map((entry, idx) => (
+              {bug.metadata.user_metadata.map((entry, idx) => (
                 <div className="metadata-item" key={idx}>
                   <div className="metadata-label">{entry.key}</div>
                   <div className="metadata-value">{entry.value}</div>

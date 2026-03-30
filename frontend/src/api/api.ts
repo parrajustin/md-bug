@@ -10,12 +10,14 @@ declare const USE_FAKE_API: boolean;
 const use_fake = typeof USE_FAKE_API !== 'undefined' ? USE_FAKE_API : false;
 
 export interface UserMetadataEntry {
+  version: number;
   key: string;
   value: string;
   type: string;
 }
 
 export interface BugMetadata {
+  version: number;
   id: number;
   reporter: string;
   type: string;
@@ -26,15 +28,16 @@ export interface BugMetadata {
   title: string;
   folders: string[];
   description: string;
-  userMetadata: UserMetadataEntry[];
-  createdAt: bigint;
-  stateId: bigint;
+  user_metadata: UserMetadataEntry[];
+  created_at: bigint;
+  state_id: bigint;
 }
 
 export interface Comment {
+  version: number;
   id: number;
   author: string;
-  epochNanoseconds: bigint;
+  epoch_nanoseconds: bigint;
   content: string;
 }
 
@@ -44,7 +47,7 @@ export interface Bug {
   folders: string[];
   metadata: BugMetadata;
   comments: Comment[];
-  stateId: bigint;
+  state_id: bigint;
 }
 
 export interface BugSummary {
@@ -90,12 +93,12 @@ export function bigIntReviver(key: string, value: any): any {
 }
 
 export interface SubmitCommentResponse {
-  commentId: number;
-  stateId: bigint;
+  comment_id: number;
+  state_id: bigint;
 }
 
 export interface ChangeMetadataResponse {
-  stateId: bigint;
+  state_id: bigint;
 }
 
 export interface API {

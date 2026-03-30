@@ -25,15 +25,7 @@ export class BackendApi implements API {
       fetch(`${BACKEND_URL}/api/bug/${id}`).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
         const text = await resp.text();
-        const data = JSON.parse(text, bigIntReviver);
-        // Map SnakeCase to CamelCase for remaining fields
-        if (data.metadata) {
-          data.metadata.createdAt = data.metadata.created_at;
-          data.metadata.stateId = data.metadata.state_id;
-          data.metadata.userMetadata = data.metadata.user_metadata;
-        }
-        data.stateId = data.state_id;
-        return data as Bug;
+        return JSON.parse(text, bigIntReviver) as Bug;
       }),
       `Failed to fetch bug ${id}`
     );
@@ -48,11 +40,7 @@ export class BackendApi implements API {
       }).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
         const text = await resp.text();
-        const data = JSON.parse(text, bigIntReviver);
-        return {
-          commentId: data.comment_id,
-          stateId: data.state_id
-        };
+        return JSON.parse(text, bigIntReviver) as SubmitCommentResponse;
       }),
       'Failed to submit comment'
     );
@@ -67,10 +55,7 @@ export class BackendApi implements API {
       }).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
         const text = await resp.text();
-        const data = JSON.parse(text, bigIntReviver);
-        return {
-          stateId: data.state_id
-        };
+        return JSON.parse(text, bigIntReviver) as ChangeMetadataResponse;
       }),
       'Failed to change metadata'
     );
