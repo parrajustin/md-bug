@@ -1,7 +1,7 @@
 import type { Result } from 'standard-ts-lib/src/result';
 import { StatusError, InternalError } from 'standard-ts-lib/src/status_error';
 import { WrapPromise } from 'standard-ts-lib/src/wrap_promise';
-import type { API, Bug, BugSummary } from './api';
+import { type API, type Bug, type BugSummary, type SubmitCommentResponse, type ChangeMetadataResponse, bigIntReviver, bigIntReplacer } from './api';
 
 const BACKEND_URL = 'http://localhost:9000';
 
@@ -13,7 +13,8 @@ export class BackendApi implements API {
     return WrapPromise(
       fetch(url.toString()).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
-        return resp.json();
+        const text = await resp.text();
+        return JSON.parse(text, bigIntReviver);
       }),
       'Failed to fetch bug list'
     );
@@ -23,18 +24,15 @@ export class BackendApi implements API {
     return WrapPromise(
       fetch(`${BACKEND_URL}/api/bug/${id}`).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
-        const data = await resp.json();
-        // Convert fields to BigInt if necessary
+        const text = await resp.text();
+        const data = JSON.parse(text, bigIntReviver);
+        // Map SnakeCase to CamelCase for remaining fields
         if (data.metadata) {
-          data.metadata.createdAt = BigInt(data.metadata.created_at);
-          data.metadata.stateId = BigInt(data.metadata.state_id);
+          data.metadata.createdAt = data.metadata.created_at;
+          data.metadata.stateId = data.metadata.state_id;
           data.metadata.userMetadata = data.metadata.user_metadata;
         }
-        if (data.comments) {
-          data.comments.forEach((c: any) => {
-            c.epochNanoseconds = BigInt(c.epoch_nanoseconds);
-          });
-        }
+        data.stateId = data.state_id;
         return data as Bug;
       }),
       `Failed to fetch bug ${id}`
@@ -46,13 +44,14 @@ export class BackendApi implements API {
       fetch(`${BACKEND_URL}/api/bug/${id}/comment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ author, content })
+        body: JSON.stringify({ author, content }, bigIntReplacer)
       }).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
-        const data = await resp.json();
+        const text = await resp.text();
+        const data = JSON.parse(text, bigIntReviver);
         return {
           commentId: data.comment_id,
-          stateId: BigInt(data.state_id)
+          stateId: data.state_id
         };
       }),
       'Failed to submit comment'
@@ -64,12 +63,13 @@ export class BackendApi implements API {
       fetch(`${BACKEND_URL}/api/bug/${id}/metadata`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field, value })
+        body: JSON.stringify({ field, value }, bigIntReplacer)
       }).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
-        const data = await resp.json();
+        const text = await resp.text();
+        const data = JSON.parse(text, bigIntReviver);
         return {
-          stateId: BigInt(data.state_id)
+          stateId: data.state_id
         };
       }),
       'Failed to change metadata'

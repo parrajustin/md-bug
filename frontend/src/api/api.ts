@@ -44,11 +44,49 @@ export interface Bug {
   folders: string[];
   metadata: BugMetadata;
   comments: Comment[];
+  stateId: bigint;
 }
 
 export interface BugSummary {
   id: number;
   title: string;
+}
+
+export function bigIntReplacer(_key: string, value: any): any {
+  if (typeof value === "bigint") {
+    return value.toString() + 'n';
+  }
+  return value;
+}
+
+/**
+ * Reviver for JSON.parse that handles u64 fields from the backend.
+ * It only targets fields known to be u64 to avoid accidental conversion of 
+ * string content (e.g., in comments) that might look like "100n".
+ */
+export function bigIntReviver(key: string, value: any): any {
+  const isBigIntField = 
+    key === 'created_at' || 
+    key === 'state_id' || 
+    key === 'epoch_nanoseconds';
+
+  if (isBigIntField) {
+    if (typeof value === 'string') {
+      if (value.endsWith('n')) {
+        const numericPart = value.slice(0, -1);
+        if (/^\d+$/.test(numericPart)) {
+          return BigInt(numericPart);
+        }
+      }
+      // If it's a numeric string without 'n', still convert to BigInt for consistency
+      if (/^\d+$/.test(value)) {
+        return BigInt(value);
+      }
+    } else if (typeof value === 'number') {
+      return BigInt(value);
+    }
+  }
+  return value;
 }
 
 export interface SubmitCommentResponse {

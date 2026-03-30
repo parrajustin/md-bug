@@ -240,6 +240,13 @@ pub async fn get_bug(
     }))
 }
 
+/// Response payload for the bug state endpoint.
+#[derive(SerdeSerialize)]
+pub struct BugStateResponse {
+    #[serde(serialize_with = "serialize_u64_as_string_n")]
+    pub state_id: u64,
+}
+
 /// Retrieves the current state ID of a specific bug.
 pub async fn get_bug_state(
     State(state): State<Arc<AppState>>,
@@ -253,7 +260,7 @@ pub async fn get_bug_state(
     let metadata: BugMetadata = read_versioned::<BugMetadata>(&metadata_data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(Json(format!("{}n", metadata.state_id)))
+    Ok(Json(BugStateResponse { state_id: metadata.state_id }))
 }
 
 /// Request payload for submitting a new comment.

@@ -180,8 +180,8 @@ async fn test_get_bug_state_endpoint() -> anyhow::Result<()> {
     let body = axum::body::to_bytes(response.into_body(), 1024 * 1024).await?;
     let json: serde_json::Value = serde_json::from_slice(&body)?;
     
-    // Verify get_bug_state returns raw state_id with "n" format
-    assert_eq!(json, "1n");
+    // Verify get_bug_state returns JSON object with state_id in "n" format
+    assert_eq!(json["state_id"], "1n");
 
     Ok(())
 }
