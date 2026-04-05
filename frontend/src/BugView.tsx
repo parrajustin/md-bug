@@ -24,6 +24,27 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
     setBug(initialBug);
   }, [initialBug]);
 
+  // Handle scrolling to comment if hash is present
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash && hash.startsWith('#comment')) {
+      const targetId = hash.substring(1);
+      let retries = 0;
+      
+      const scrollAttempt = () => {
+        const element = document.getElementById(targetId);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth' });
+        } else if (retries < 10) {
+          retries++;
+          requestAnimationFrame(scrollAttempt);
+        }
+      };
+      
+      scrollAttempt();
+    }
+  }, [bug]);
+
   const renderMarkdown = (content: string) => {
     const rawHtml = marked.parse(content) as string;
     return { __html: DOMPurify.sanitize(rawHtml, { RETURN_TRUSTED_TYPE: true }) as unknown as string };
@@ -122,9 +143,9 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
           </div>
 
           {bug.comments.map((comment) => (
-            <div key={comment.id} className="comment-card">
+            <div key={comment.id} id={`comment${comment.id}`} className="comment-card">
               <div className="comment-header">
-                <strong>{comment.author}</strong> commented · {formatTemporalDate(comment.epoch_nanoseconds)} · #{comment.id}
+                <strong>{comment.author}</strong> commented · {formatTemporalDate(comment.epoch_nanoseconds)} · <a href={`#comment${comment.id}`} style={{ color: '#3b82f6', textDecoration: 'none' }}>#{comment.id}</a>
               </div>
               <div dangerouslySetInnerHTML={renderMarkdown(comment.content)} />
             </div>
