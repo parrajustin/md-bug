@@ -65,6 +65,22 @@ export class Storage {
       'Failed to set username in storage'
     );
   }
+
+  async clearUsername(): Promise<StatusResult<StatusError>> {
+    return WrapPromise(
+      this.getDb().then((db) => {
+        return new Promise<unknown>((resolve, reject) => {
+          const transaction = db.transaction(STORE_NAME, 'readwrite');
+          const store = transaction.objectStore(STORE_NAME);
+          const request = store.delete(USERNAME_KEY);
+
+          request.onsuccess = () => resolve(Ok());
+          request.onerror = () => reject(request.error);
+        });
+      }),
+      'Failed to clear username from storage'
+    );
+  }
 }
 
 export const storage = new Storage();

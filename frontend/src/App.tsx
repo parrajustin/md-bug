@@ -104,6 +104,7 @@ const App: React.FC = () => {
   const [bugResult, setBugResult] = useState<Result<Bug, StatusError> | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [checkingUsername, setCheckingUsername] = useState(true);
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
 
   useEffect(() => {
     storage.getUsername().then(result => {
@@ -120,6 +121,13 @@ const App: React.FC = () => {
 
   const handleLogin = (name: string) => {
     setUsername(name);
+    navigate('/');
+  };
+
+  const handleSignOut = async () => {
+    await storage.clearUsername();
+    setUsername(null);
+    setShowUserDropdown(false);
     navigate('/');
   };
 
@@ -145,8 +153,41 @@ const App: React.FC = () => {
         <div className="search-container">
           <input type="text" placeholder="Search bugs..." />
         </div>
-        <div style={{ width: '240px', textAlign: 'right', paddingRight: '20px', color: '#888', fontSize: '14px' }}>
+        <div 
+          className="user-profile-container"
+          style={{ width: '240px', textAlign: 'right', paddingRight: '20px', color: '#888', fontSize: '14px', position: 'relative', cursor: 'pointer' }}
+          onClick={() => setShowUserDropdown(!showUserDropdown)}
+        >
           {username} 👤
+          {showUserDropdown && (
+            <div 
+              className="user-dropdown"
+              style={{
+                position: 'absolute',
+                top: '100%',
+                right: '20px',
+                backgroundColor: '#1e1e1e',
+                border: '1px solid #333',
+                borderRadius: '4px',
+                padding: '10px',
+                zIndex: 100,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                minWidth: '120px',
+                textAlign: 'left'
+              }}
+            >
+              <div 
+                className="dropdown-item" 
+                style={{ color: 'white', padding: '8px', cursor: 'pointer' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSignOut();
+                }}
+              >
+                Sign out
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
