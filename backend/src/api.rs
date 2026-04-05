@@ -61,11 +61,38 @@ pub struct AccessMetadata {
     pub view_access: Vec<String>,
 }
 
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
+#[archive(check_bytes)]
+pub enum Permission {
+    ComponentAdmin,
+    CreateIssues,
+    AdminIssues,
+    EditIssues,
+    CommentOnIssues,
+    ViewIssues,
+}
+
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
+#[archive(check_bytes)]
+pub struct GroupPermissions {
+    pub permissions: Vec<Permission>,
+    pub view_level: u32,
+    pub members: Vec<String>,
+}
+
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq, Default)]
+#[archive(check_bytes)]
+pub struct AccessControl {
+    pub groups: HashMap<String, GroupPermissions>,
+}
+
 /// Represents metadata for a component (folder).
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
 #[archive(check_bytes)]
 pub struct ComponentMetadata {
     pub version: u32,
+    pub name: String,
+    pub description: String,
     pub creator: String,
     pub bug_type: Option<String>,
     pub priority: Option<String>,
@@ -73,8 +100,7 @@ pub struct ComponentMetadata {
     pub verifier: Option<String>,
     pub collaborators: Vec<String>,
     pub cc: Vec<String>,
-    pub admins: Vec<String>,
-    pub access: AccessMetadata,
+    pub access_control: AccessControl,
     pub user_metadata: Vec<UserMetadataEntry>,
     #[serde(serialize_with = "serialize_u64_as_string_n")]
     pub created_at: u64,
@@ -101,6 +127,8 @@ impl ComponentMetadata {
     pub fn empty() -> Self {
         Self {
             version: CURRENT_VERSION,
+            name: "".to_string(),
+            description: "".to_string(),
             creator: "".to_string(),
             bug_type: None,
             priority: None,
@@ -108,8 +136,7 @@ impl ComponentMetadata {
             verifier: None,
             collaborators: vec![],
             cc: vec![],
-            admins: vec![],
-            access: AccessMetadata::default(),
+            access_control: AccessControl::default(),
             user_metadata: vec![],
             created_at: 0,
         }
@@ -118,23 +145,22 @@ impl ComponentMetadata {
     /// Merges this metadata with a child's metadata, with the child taking precedence.
     pub fn merge(&self, child: &ComponentMetadata) -> ComponentMetadata {
         let mut merged = self.clone();
+        if !child.name.is_empty() { merged.name = child.name.clone(); }
+        if !child.description.is_empty() { merged.description = child.description.clone(); }
         if !child.creator.is_empty() { merged.creator = child.creator.clone(); }
         if child.bug_type.is_some() { merged.bug_type = child.bug_type.clone(); }
         if child.priority.is_some() { merged.priority = child.priority.clone(); }
         if child.severity.is_some() { merged.severity = child.severity.clone(); }
         if child.verifier.is_some() { merged.verifier = child.verifier.clone(); }
         
-        // For lists, we'll overwrite if the child has any entries for now.
-        // This is a simple policy that can be refined.
         if !child.collaborators.is_empty() { merged.collaborators = child.collaborators.clone(); }
         if !child.cc.is_empty() { merged.cc = child.cc.clone(); }
-        if !child.admins.is_empty() { merged.admins = child.admins.clone(); }
         
-        // Merge access lists? Usually admins at higher levels should keep access.
-        // But for specific access lists, child usually overwrites.
-        if !child.access.full_access.is_empty() { merged.access.full_access = child.access.full_access.clone(); }
-        if !child.access.comment_access.is_empty() { merged.access.comment_access = child.access.comment_access.clone(); }
-        if !child.access.view_access.is_empty() { merged.access.view_access = child.access.view_access.clone(); }
+        // Merge access control: for now we'll just merge the groups map.
+        // Child groups with same name overwrite parent groups.
+        for (name, perms) in &child.access_control.groups {
+            merged.access_control.groups.insert(name.clone(), perms.clone());
+        }
 
         if !child.user_metadata.is_empty() { merged.user_metadata = child.user_metadata.clone(); }
         if child.created_at > 0 { merged.created_at = child.created_at; }
@@ -143,7 +169,7 @@ impl ComponentMetadata {
     }
 }
 
-#[derive(Debug, PartialEq, PartialOrd)]
+#[derive(Debug, PartialEq, PartialOrd, Eq, Ord)]
 pub enum UserAccessLevel {
     None,
     View,
@@ -159,24 +185,40 @@ impl HasVersion for AccessMetadata {
 
 impl BugMetadata {
     pub fn access_level(&self, root: &std::path::Path, username: &str) -> UserAccessLevel {
-        // 1. Check if user is a component admin at any level of the hierarchy
+        // 1. Check hierarchical component permissions
         let path_str = self.folders.join("/");
         let resolved_meta = resolve_component_metadata(root, &path_str);
-        if resolved_meta.admins.iter().any(|u| u == username) {
-            return UserAccessLevel::Full;
+        
+        let mut max_level = UserAccessLevel::None;
+
+        for group in resolved_meta.access_control.groups.values() {
+            if group.members.contains(&username.to_string()) || group.members.contains(&"PUBLIC".to_string()) {
+                if group.permissions.contains(&Permission::ComponentAdmin) || 
+                   group.permissions.contains(&Permission::AdminIssues) ||
+                   group.permissions.contains(&Permission::EditIssues) {
+                    max_level = std::cmp::max(max_level, UserAccessLevel::Full);
+                }
+                if group.permissions.contains(&Permission::CommentOnIssues) {
+                    max_level = std::cmp::max(max_level, UserAccessLevel::Comment);
+                }
+                if group.permissions.contains(&Permission::ViewIssues) {
+                    max_level = std::cmp::max(max_level, UserAccessLevel::View);
+                }
+            }
         }
 
-        // 2. Check bug-specific access lists
+        // 2. Check bug-specific access lists (for compatibility/bug-specific overrides)
         if self.access.full_access.iter().any(|u| u == username || u == "PUBLIC") {
-            return UserAccessLevel::Full;
+            max_level = std::cmp::max(max_level, UserAccessLevel::Full);
         }
         if self.access.comment_access.iter().any(|u| u == username || u == "PUBLIC") {
-            return UserAccessLevel::Comment;
+            max_level = std::cmp::max(max_level, UserAccessLevel::Comment);
         }
         if self.access.view_access.iter().any(|u| u == username || u == "PUBLIC") {
-            return UserAccessLevel::View;
+            max_level = std::cmp::max(max_level, UserAccessLevel::View);
         }
-        UserAccessLevel::None
+
+        max_level
     }
 }
 
@@ -340,6 +382,129 @@ pub fn resolve_component_metadata(root: &std::path::Path, path: &str) -> Compone
     }
 
     resolved
+}
+
+/// Request payload for creating a new component.
+#[derive(SerdeDeserialize)]
+pub struct CreateComponentRequest {
+    pub u: String,
+    pub name: String,
+    pub description: String,
+    pub parent: String, // Path like "google/perception" or "" for root
+}
+
+/// Helper to sanitize names for filesystem use.
+fn sanitize_name(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .collect()
+}
+
+/// Creates a new component.
+pub async fn create_component(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<CreateComponentRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let parent_path = if payload.parent.is_empty() {
+        state.root.clone()
+    } else {
+        state.root.join(payload.parent.replace('/', std::path::MAIN_SEPARATOR_STR))
+    };
+
+    if !parent_path.exists() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    // Check if component with same name already exists in metadata of children
+    if let Ok(dir) = fs::read_dir(&parent_path) {
+        for entry in dir.filter_map(|e| e.ok()) {
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                let meta_file = entry.path().join("component_metadata");
+                if let Ok(data) = fs::read(&meta_file) {
+                    if let Ok(meta) = read_versioned::<ComponentMetadata>(&data) {
+                        if meta.name == payload.name {
+                            return Err(StatusCode::CONFLICT);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let safe_name = sanitize_name(&payload.name);
+    let mut component_path = parent_path.join(&safe_name);
+    
+    // If safe_name conflicts with existing folder, append a suffix
+    let mut suffix = 1;
+    while component_path.exists() {
+        component_path = parent_path.join(format!("{}_{}", safe_name, suffix));
+        suffix += 1;
+    }
+
+    fs::create_dir_all(&component_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let mut groups = HashMap::new();
+    
+    // Default groups
+    groups.insert("Component Admins".to_string(), GroupPermissions {
+        permissions: vec![
+            Permission::ComponentAdmin, Permission::CreateIssues, Permission::AdminIssues,
+            Permission::EditIssues, Permission::CommentOnIssues, Permission::ViewIssues
+        ],
+        view_level: 999,
+        members: vec![payload.u.clone()],
+    });
+
+    groups.insert("Issue Admins".to_string(), GroupPermissions {
+        permissions: vec![
+            Permission::CreateIssues, Permission::AdminIssues,
+            Permission::EditIssues, Permission::CommentOnIssues, Permission::ViewIssues
+        ],
+        view_level: 500,
+        members: vec![],
+    });
+
+    groups.insert("Issue Editors".to_string(), GroupPermissions {
+        permissions: vec![
+            Permission::CreateIssues, Permission::EditIssues, 
+            Permission::CommentOnIssues, Permission::ViewIssues
+        ],
+        view_level: 100,
+        members: vec![],
+    });
+
+    groups.insert("Issue Contributors".to_string(), GroupPermissions {
+        permissions: vec![
+            Permission::CreateIssues, Permission::CommentOnIssues, Permission::ViewIssues
+        ],
+        view_level: 1,
+        members: vec!["PUBLIC".to_string()],
+    });
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let meta = ComponentMetadata {
+        version: CURRENT_VERSION,
+        name: payload.name,
+        description: payload.description,
+        creator: payload.u,
+        bug_type: None,
+        priority: None,
+        severity: None,
+        verifier: None,
+        collaborators: vec![],
+        cc: vec![],
+        access_control: AccessControl { groups },
+        user_metadata: vec![],
+        created_at: now.as_nanos() as u64,
+    };
+
+    let bytes = rkyv::to_bytes::<_, 2048>(&meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    fs::write(component_path.join("component_metadata"), bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::CREATED)
 }
 
 /// Retrieves the resolved metadata for a specific component.

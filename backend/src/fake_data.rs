@@ -58,9 +58,11 @@ pub fn generate_fake_data(root: &Path) {
 
             // 50/50 chance to create component metadata if it doesn't exist
             let meta_file = current_path.join("component_metadata");
-            if !meta_file.exists() {
+            if !meta_file.exists() && rng.gen_bool(0.5) {
                 let comp_meta = ComponentMetadata {
                     version: CURRENT_VERSION,
+                    name: f.clone(),
+                    description: format!("Description for component {}", f),
                     creator: SafeEmail().fake(),
                     bug_type: Some(types[rng.gen_range(0..types.len())].to_string()),
                     priority: Some(priorities[rng.gen_range(0..priorities.len())].to_string()),
@@ -68,13 +70,15 @@ pub fn generate_fake_data(root: &Path) {
                     verifier: Some(SafeEmail().fake()),
                     collaborators: vec![SafeEmail().fake()],
                     cc: vec![SafeEmail().fake()],
-                    admins: vec![SafeEmail().fake()],
-                    access: AccessMetadata {
-                        version: CURRENT_VERSION,
-                        full_access: vec![],
-                        comment_access: vec!["PUBLIC".to_string()],
-                        view_access: vec![],
-                    },
+                    access_control: AccessControl { groups: {
+                        let mut g = HashMap::new();
+                        g.insert("Component Admins".to_string(), GroupPermissions {
+                            permissions: vec![Permission::ComponentAdmin, Permission::ViewIssues],
+                            view_level: 999,
+                            members: vec![SafeEmail().fake()],
+                        });
+                        g
+                    }},
                     user_metadata: vec![],
                     created_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0),
                 };
