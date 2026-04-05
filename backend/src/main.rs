@@ -1,5 +1,6 @@
 mod api;
 mod fake_data;
+mod bug_id_cache;
 
 use axum::{
     routing::{get, post},
@@ -12,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tower_http::services::{ServeDir, ServeFile};
 use crate::api::AppState;
-use crate::api::bug_id_cache::BugIdCache;
+use crate::bug_id_cache::BugIdCache;
 
 #[derive(Parser)]
 struct Args {

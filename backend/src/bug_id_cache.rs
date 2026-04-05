@@ -105,4 +105,5 @@ impl BugIdCache {
 }
 
 #[cfg(test)]
+#[path = "bug_id_cache_test.rs"]
 mod bug_id_cache_test;

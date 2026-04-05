@@ -11,8 +11,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use walkdir::WalkDir;
 
-pub mod bug_id_cache;
-use bug_id_cache::BugIdCache;
+use crate::bug_id_cache::BugIdCache;
 
 pub const CURRENT_VERSION: u32 = 1;
 

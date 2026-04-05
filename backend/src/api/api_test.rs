@@ -7,7 +7,7 @@ use std::fs;
 use std::sync::{Arc, Mutex};
 use std::path::Path as StdPath;
 use axum::http::StatusCode;
-use crate::api::bug_id_cache::BugIdCache;
+use crate::bug_id_cache::BugIdCache;
 
 fn create_test_bug(root: &StdPath, id: u32, folders: Vec<String>) -> anyhow::Result<std::path::PathBuf> {
     let mut bug_path = root.to_path_buf();
