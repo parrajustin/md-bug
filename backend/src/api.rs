@@ -142,6 +142,17 @@ impl ComponentMetadata {
         }
     }
 
+    pub fn has_permission(&self, username: &str, permission: &Permission) -> bool {
+        for group in self.access_control.groups.values() {
+            if (group.members.contains(&username.to_string()) || group.members.contains(&"PUBLIC".to_string()))
+                && (group.permissions.contains(permission) || group.permissions.contains(&Permission::ComponentAdmin))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Merges this metadata with a child's metadata, with the child taking precedence.
     pub fn merge(&self, child: &ComponentMetadata) -> ComponentMetadata {
         let mut merged = self.clone();
@@ -405,14 +416,24 @@ pub async fn create_component(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<CreateComponentRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let parent_path = if payload.parent.is_empty() {
-        state.root.clone()
-    } else {
-        state.root.join(payload.parent.replace('/', std::path::MAIN_SEPARATOR_STR))
-    };
+    // Creating a component at the root is not allowed!
+    if payload.parent.is_empty() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let parent_path = 
+        state.root.join(payload.parent.replace('/', std::path::MAIN_SEPARATOR_STR));
 
     if !parent_path.exists() {
         return Err(StatusCode::NOT_FOUND);
+    }
+
+    // Check permissions on parent
+    let parent_meta = resolve_component_metadata(&state.root, &payload.parent);
+    let is_authorized = parent_meta.has_permission(&payload.u, &Permission::ComponentAdmin);
+
+    if !is_authorized {
+        return Err(StatusCode::FORBIDDEN);
     }
 
     // Check if component with same name already exists in metadata of children
