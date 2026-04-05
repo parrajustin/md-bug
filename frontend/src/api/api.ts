@@ -16,6 +16,13 @@ export interface UserMetadataEntry {
   type: string;
 }
 
+export interface AccessMetadata {
+  version: number;
+  full_access: string[];
+  comment_access: string[];
+  view_access: string[];
+}
+
 export interface BugMetadata {
   version: number;
   id: number;
@@ -25,6 +32,10 @@ export interface BugMetadata {
   severity: string;
   status: string;
   assignee: string;
+  verifier: string;
+  collaborators: string[];
+  cc: string[];
+  access: AccessMetadata;
   title: string;
   folders: string[];
   description: string;

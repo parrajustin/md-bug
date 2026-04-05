@@ -5,7 +5,7 @@ use fake::Fake;
 use fake::faker::lorem::en::{Sentence, Paragraph};
 use fake::faker::internet::en::SafeEmail;
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::api::{BugMetadata, Comment, CURRENT_VERSION};
+use crate::api::{BugMetadata, Comment, AccessMetadata, CURRENT_VERSION};
 use walkdir::WalkDir;
 
 pub fn generate_fake_data(root: &Path) {
@@ -68,6 +68,15 @@ pub fn generate_fake_data(root: &Path) {
             severity: severities[rng.gen_range(0..severities.len())].to_string(),
             status: statuses[rng.gen_range(0..statuses.len())].to_string(),
             assignee: SafeEmail().fake(),
+            verifier: SafeEmail().fake(),
+            collaborators: vec![SafeEmail().fake(), SafeEmail().fake()],
+            cc: vec![SafeEmail().fake()],
+            access: AccessMetadata {
+                version: CURRENT_VERSION,
+                full_access: vec![SafeEmail().fake()],
+                comment_access: vec![SafeEmail().fake()],
+                view_access: vec![SafeEmail().fake()],
+            },
             title: Sentence(3..8).fake(),
             folders,
             description: Paragraph(1..5).fake(),

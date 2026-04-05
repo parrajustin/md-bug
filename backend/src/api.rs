@@ -49,6 +49,25 @@ impl HasVersion for UserMetadataEntry {
     }
 }
 
+/// Represents access control levels for a bug.
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
+#[archive(check_bytes)]
+pub struct AccessMetadata {
+    pub version: u32,
+    /// Users with full administrative access.
+    pub full_access: Vec<String>,
+    /// Users who can only comment.
+    pub comment_access: Vec<String>,
+    /// Users who can only view.
+    pub view_access: Vec<String>,
+}
+
+impl HasVersion for AccessMetadata {
+    fn get_version(&self) -> u32 {
+        self.version
+    }
+}
+
 /// Contains all the core metadata for a bug.
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
 #[archive(check_bytes)]
@@ -69,6 +88,14 @@ pub struct BugMetadata {
     pub status: String,
     /// The user currently assigned to the bug.
     pub assignee: String,
+    /// The user who will verify the fix.
+    pub verifier: String,
+    /// Users helping with the bug.
+    pub collaborators: Vec<String>,
+    /// Users to be notified of updates.
+    pub cc: Vec<String>,
+    /// Access control lists.
+    pub access: AccessMetadata,
     /// Brief title describing the bug.
     pub title: String,
     /// Hierarchical components/folders the bug belongs to.

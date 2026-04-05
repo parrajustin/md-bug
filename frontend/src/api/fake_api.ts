@@ -17,6 +17,15 @@ export class FakeApi implements API {
         severity: "S3",
         status: "Assigned",
         assignee: "an...@google.com",
+        verifier: "ve...@google.com",
+        collaborators: ["co...@google.com", "he...@google.com"],
+        cc: ["cc...@google.com"],
+        access: {
+          version: 1,
+          full_access: ["an...@google.com"],
+          comment_access: ["ch...@kivra.com"],
+          view_access: []
+        },
         title: "Bumping gradle from 8.11.x to higher major versions causes androidTest compile failures",
         folders: ["Android Public Tracker", "App Development", "Jetpack (androidx)"],
         description: "Compiling androidTest fails when upgrading from 8.11.x to 8.12 or higher. This seems to be related to the new dependency resolution engine.",

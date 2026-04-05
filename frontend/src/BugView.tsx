@@ -18,6 +18,7 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
   const [bug, setBug] = useState<Bug>(initialBug);
   const [commentText, setCommentText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showAccessModal, setShowAccessModal] = useState(false);
 
   // Synchronize local state when the bug prop changes (e.g., from a refresh)
   useEffect(() => {
@@ -220,6 +221,95 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
             <div className="metadata-label">Assignee</div>
             <div className="metadata-value">{bug.metadata.assignee}</div>
           </div>
+          <div className="metadata-item">
+            <div className="metadata-label">Verifier</div>
+            <div className="metadata-value">{bug.metadata.verifier || 'None'}</div>
+          </div>
+          <div className="metadata-item">
+            <div className="metadata-label">Collaborators</div>
+            <div className="metadata-value">{bug.metadata.collaborators.join(', ') || 'None'}</div>
+          </div>
+          <div className="metadata-item">
+            <div className="metadata-label">CC</div>
+            <div className="metadata-value">{bug.metadata.cc.join(', ') || 'None'}</div>
+          </div>
+          <div className="metadata-item">
+            <div className="metadata-label">Access</div>
+            <div className="metadata-value">
+              <span 
+                style={{ color: '#3b82f6', cursor: 'pointer', textDecoration: 'underline' }}
+                onClick={() => setShowAccessModal(true)}
+              >
+                View
+              </span>
+            </div>
+          </div>
+
+          {showAccessModal && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              backgroundColor: 'rgba(0, 0, 0, 0.7)',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              zIndex: 1000
+            }}>
+              <div style={{
+                backgroundColor: '#1e1e1e',
+                padding: '20px',
+                borderRadius: '8px',
+                width: '500px',
+                maxHeight: '80vh',
+                overflowY: 'auto',
+                border: '1px solid #333',
+                color: 'white'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+                  <h2 style={{ margin: 0 }}>Access Control</h2>
+                  <button 
+                    onClick={() => setShowAccessModal(false)}
+                    style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '20px' }}
+                  >
+                    ×
+                  </button>
+                </div>
+                
+                <div style={{ marginBottom: '20px' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>Users who can edit, comment, and view</div>
+                  <div style={{ backgroundColor: '#2d2d2d', padding: '10px', borderRadius: '4px', minHeight: '30px', border: '1px solid #444' }}>
+                    {bug.metadata.access.full_access.join(', ') || 'None'}
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '20px' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>Users who can comment, and view</div>
+                  <div style={{ backgroundColor: '#2d2d2d', padding: '10px', borderRadius: '4px', minHeight: '30px', border: '1px solid #444' }}>
+                    {bug.metadata.access.comment_access.join(', ') || 'None'}
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '20px' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>Users who can view</div>
+                  <div style={{ backgroundColor: '#2d2d2d', padding: '10px', borderRadius: '4px', minHeight: '30px', border: '1px solid #444' }}>
+                    {bug.metadata.access.view_access.join(', ') || 'None'}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button 
+                    className="primary-btn" 
+                    onClick={() => setShowAccessModal(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {bug.metadata.user_metadata.length > 0 && (
             <>
