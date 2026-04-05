@@ -31,6 +31,17 @@ export class BackendApi implements API {
     );
   }
 
+  async get_bug_state(id: number): Promise<Result<bigint, StatusError>> {
+    return WrapPromise(
+      fetch(`${BACKEND_URL}/api/bug/${id}/state`).then(async resp => {
+        if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
+        const text = await resp.text();
+        return bigIntReviver('state_id', text);
+      }),
+      `Failed to fetch state for bug ${id}`
+    );
+  }
+
   async submit_comment(id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>> {
     return WrapPromise(
       fetch(`${BACKEND_URL}/api/bug/${id}/comment`, {

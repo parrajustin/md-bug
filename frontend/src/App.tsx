@@ -7,27 +7,52 @@ import { type Result } from 'standard-ts-lib/src/result';
 import { StatusError } from 'standard-ts-lib/src/status_error';
 import './styles.css';
 
-const BugLoader: React.FC = () => {
+interface BugLoaderProps {
+  currentResult: Result<Bug, StatusError> | null;
+  setResult: (result: Result<Bug, StatusError> | null) => void;
+}
+
+const BugLoader: React.FC<BugLoaderProps> = ({ currentResult, setResult }) => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [bugResult, setBugResult] = useState<Result<Bug, StatusError> | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
 
   useEffect(() => {
     if (id) {
       const bugId = parseInt(id);
       const apiResult = get_api();
-      if (apiResult.ok) {
-        setLoading(true);
-        apiResult.val.get_bug(bugId).then((result) => {
-          setBugResult(result);
-          setLoading(false);
+      if (!apiResult.ok) {
+        setResult(apiResult as any);
+        return;
+      }
+
+      const api = apiResult.val;
+      const cachedBug = currentResult?.ok ? currentResult.val : null;
+
+      if (cachedBug && cachedBug.id === bugId) {
+        // Optimization: Check state first for the "already cached" bug
+        api.get_bug_state(bugId).then((stateResult) => {
+          if (stateResult.ok && stateResult.val === cachedBug.state_id) {
+            // State matches, no need to re-fetch
+          } else {
+            // State mismatch or error, fetch full bug
+            fetchFullBug(api, bugId);
+          }
         });
       } else {
-        setBugResult(apiResult as any);
+        // Not in state or different bug, fetch full bug
+        fetchFullBug(api, bugId);
       }
     }
   }, [id]);
+
+  const fetchFullBug = (api: any, bugId: number) => {
+    setLoading(true);
+    api.get_bug(bugId).then((result: Result<Bug, StatusError>) => {
+      setResult(result);
+      setLoading(false);
+    });
+  };
 
   if (loading) {
     return (
@@ -37,29 +62,29 @@ const BugLoader: React.FC = () => {
     );
   }
 
-  if (bugResult?.err) {
+  if (currentResult?.err) {
     return (
       <div className="error-view" style={{ padding: '20px', color: '#ff4d4d' }}>
         <h2>Error Loading Bug</h2>
-        <p>{bugResult.val.message}</p>
+        <p>{currentResult.val.message}</p>
         <button onClick={() => navigate('/')} className="create-btn">Back Home</button>
       </div>
     );
   }
 
-  if (bugResult?.ok) {
+  if (currentResult?.ok) {
     return (
       <BugView 
-        bug={bugResult.val} 
+        bug={currentResult.val} 
         onHome={() => navigate('/')} 
-        onRefresh={(id) => {
-          const apiResult = get_api();
-          if (apiResult.ok) {
-            setLoading(true);
-            apiResult.val.get_bug(id).then((result) => {
-              setBugResult(result);
-              setLoading(false);
-            });
+        onRefresh={(id, updatedBug) => {
+          if (updatedBug) {
+            setResult({ ok: true, val: updatedBug } as Result<Bug, StatusError>);
+          } else {
+            const apiResult = get_api();
+            if (apiResult.ok) {
+              fetchFullBug(apiResult.val, id);
+            }
           }
         }} 
       />
@@ -72,6 +97,7 @@ const BugLoader: React.FC = () => {
 const App: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const [bugResult, setBugResult] = useState<Result<Bug, StatusError> | null>(null);
 
   const handleBugClick = (id: number) => {
     navigate(`/issue/${id}`);
@@ -115,7 +141,7 @@ const App: React.FC = () => {
           <Routes>
             <Route path="/" element={<HomeView onBugSelect={handleBugClick} />} />
             <Route path="/home" element={<HomeView onBugSelect={handleBugClick} />} />
-            <Route path="/issue/:id" element={<BugLoader />} />
+            <Route path="/issue/:id" element={<BugLoader currentResult={bugResult} setResult={setBugResult} />} />
           </Routes>
         </main>
       </div>

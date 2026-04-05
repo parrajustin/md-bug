@@ -10,7 +10,7 @@ declare const Temporal: any;
 interface BugViewProps {
   bug: Bug;
   onHome: () => void;
-  onRefresh: (id: number) => void;
+  onRefresh: (id: number, updatedBug?: Bug) => void;
 }
 
 const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh }) => {
@@ -64,19 +64,32 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh })
     
     if (result.ok) {
       const response = result.val;
-      const newComment: Comment = {
-        version: 1, // Current version
-        id: response.comment_id,
-        author: 'current_user',
-        epoch_nanoseconds: BigInt(Date.now()) * 1000000n,
-        content: commentText,
-      };
+      
+      if (response.state_id === bug.state_id + 1n) {
+        // State is exactly +1, we can just append our comment locally
+        const newComment: Comment = {
+          version: 1,
+          id: response.comment_id,
+          author: 'current_user',
+          epoch_nanoseconds: BigInt(Date.now()) * 1000000n,
+          content: commentText,
+        };
 
-      setBug({
-        ...bug,
-        comments: [...bug.comments, newComment],
-        state_id: response.state_id,
-      });
+        const updatedBug = {
+          ...bug,
+          comments: [...bug.comments, newComment],
+          state_id: response.state_id,
+        };
+        setBug(updatedBug);
+        onRefresh(bug.id, updatedBug); // Update the "cache" in App
+      } else {
+        // Significant change happened elsewhere, fetch full bug
+        const fullBugResult = await apiResult.val.get_bug(bug.id);
+        if (fullBugResult.ok) {
+          setBug(fullBugResult.val);
+          onRefresh(bug.id, fullBugResult.val); // Update the "cache" in App
+        }
+      }
       setCommentText('');
     } else {
       alert('Failed to submit comment: ' + result.val.message);

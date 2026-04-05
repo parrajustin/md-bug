@@ -57,6 +57,12 @@ export class FakeApi implements API {
     return Ok(bug);
   }
 
+  async get_bug_state(id: number): Promise<Result<bigint, StatusError>> {
+    const bug = this.mockBugs.find(b => b.id === id);
+    if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
+    return Ok(bug.state_id);
+  }
+
   async submit_comment(id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));

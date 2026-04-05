@@ -104,6 +104,7 @@ export interface ChangeMetadataResponse {
 export interface API {
   get_bug_list(query?: string): Promise<Result<BugSummary[], StatusError>>;
   get_bug(id: number): Promise<Result<Bug, StatusError>>;
+  get_bug_state(id: number): Promise<Result<bigint, StatusError>>;
   submit_comment(id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>>;
   change_metadata(id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>>;
 }
