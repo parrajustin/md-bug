@@ -32,7 +32,7 @@ fn create_test_bug(root: &StdPath, id: u32, folders: Vec<String>) -> anyhow::Res
         access: AccessMetadata {
             version: CURRENT_VERSION,
             full_access: vec![],
-            comment_access: vec![],
+            comment_access: vec!["PUBLIC".to_string()],
             view_access: vec![],
         },
         title: format!("Test Bug {}", id),
@@ -62,7 +62,7 @@ async fn test_create_and_get_bug() -> anyhow::Result<()> {
         bug_locks: Mutex::new(HashMap::new()),
     });
 
-    let response = get_bug(State(state.clone()), Path(1)).await.into_response();
+    let response = get_bug(State(state.clone()), Path(1), Query(BugQuery { u: "test@example.com".to_string() })).await.into_response();
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), 1024 * 1024).await?;
@@ -91,6 +91,7 @@ async fn test_submit_comment() -> anyhow::Result<()> {
     let req = CommentRequest {
         author: "alice".to_string(),
         content: "Hello world".to_string(),
+        u: "alice".to_string(),
     };
 
     let response = submit_comment(State(state.clone()), Path(42), Json(req)).await.into_response();
@@ -132,9 +133,22 @@ async fn test_change_metadata() -> anyhow::Result<()> {
         bug_locks: Mutex::new(HashMap::new()),
     });
 
+    // Note: create_test_bug by default only gives Comment access to PUBLIC.
+    // We need to either give Full access to "admin" or use a user with Full access.
+    // Let's modify the bug's metadata to give Full access to "admin".
+    let bug_path = dir.path().join("meta").join("100");
+    let data = fs::read(bug_path.join("metadata"))?;
+    let mut metadata: BugMetadata = rkyv::from_bytes::<BugMetadata>(&data)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    metadata.access.full_access.push("admin".to_string());
+    let bytes = rkyv::to_bytes::<_, 1024>(&metadata)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    fs::write(bug_path.join("metadata"), bytes)?;
+
     let req = MetadataChangeRequest {
         field: "status".to_string(),
         value: "In Progress".to_string(),
+        u: "admin".to_string(),
     };
 
     let response = change_metadata(State(state.clone()), Path(100), Json(req)).await.into_response();
@@ -146,7 +160,6 @@ async fn test_change_metadata() -> anyhow::Result<()> {
     // Verify response contains new state_id in correct format
     assert_eq!(json["state_id"], "2n");
 
-    let bug_path = dir.path().join("meta").join("100");
     let data = fs::read(bug_path.join("metadata"))?;
     let metadata: BugMetadata = rkyv::from_bytes::<BugMetadata>(&data)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -157,8 +170,9 @@ async fn test_change_metadata() -> anyhow::Result<()> {
     let req_user = MetadataChangeRequest {
         field: "Team".to_string(),
         value: "Perception".to_string(),
+        u: "admin".to_string(),
     };
-    let response = change_metadata(State(state), Path(100), Json(req_user)).await.into_response();
+    let response = change_metadata(State(state.clone()), Path(100), Json(req_user)).await.into_response();
     assert_eq!(response.status(), StatusCode::OK);
 
     let data = fs::read(bug_path.join("metadata"))?;
@@ -183,7 +197,7 @@ async fn test_get_bug_state_endpoint() -> anyhow::Result<()> {
         bug_locks: Mutex::new(HashMap::new()),
     });
 
-    let response = get_bug_state(State(state), Path(200)).await.into_response();
+    let response = get_bug_state(State(state), Path(200), Query(BugQuery { u: "test".to_string() })).await.into_response();
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), 1024 * 1024).await?;

@@ -83,7 +83,7 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
     if (!apiResult.ok) return;
 
     setIsSubmitting(true);
-    const result = await apiResult.val.submit_comment(bug.id, username, commentText);
+    const result = await apiResult.val.submit_comment(username, bug.id, username, commentText);
     
     if (result.ok) {
       const response = result.val;
@@ -107,7 +107,7 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
         onRefresh(bug.id, updatedBug); // Update the "cache" in App
       } else {
         // Significant change happened elsewhere, fetch full bug
-        const fullBugResult = await apiResult.val.get_bug(bug.id);
+        const fullBugResult = await apiResult.val.get_bug(username, bug.id);
         if (fullBugResult.ok) {
           setBug(fullBugResult.val);
           onRefresh(bug.id, fullBugResult.val); // Update the "cache" in App
@@ -119,6 +119,12 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
     }
     setIsSubmitting(false);
   };
+
+  const hasCommentAccess = 
+    bug.metadata.access.full_access.includes(username) || 
+    bug.metadata.access.full_access.includes('PUBLIC') || 
+    bug.metadata.access.comment_access.includes(username) || 
+    bug.metadata.access.comment_access.includes('PUBLIC');
 
   return (
     <div className="bug-view">
@@ -152,47 +158,49 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
             </div>
           ))}
 
-          <div className="comment-input-section" style={{ marginTop: '20px' }}>
-            <textarea
-              style={{
-                width: 'calc(100% - 20px)',
-                height: '150px',
-                backgroundColor: '#1e1e1e',
-                color: 'white',
-                border: '1px solid #333',
-                borderRadius: '4px',
-                padding: '10px',
-                fontFamily: 'inherit',
-                resize: 'vertical'
-              }}
-              placeholder="Add a comment..."
-              value={commentText}
-              onChange={(e) => setCommentText(e.target.value)}
-            />
-            <div style={{ marginTop: '10px' }}>
-              <button
-                className="primary-btn"
-                onClick={handleCommentSubmit}
-                disabled={isSubmitting}
+          {hasCommentAccess && (
+            <div className="comment-input-section" style={{ marginTop: '20px' }}>
+              <textarea
+                style={{
+                  width: 'calc(100% - 20px)',
+                  height: '150px',
+                  backgroundColor: '#1e1e1e',
+                  color: 'white',
+                  border: '1px solid #333',
+                  borderRadius: '4px',
+                  padding: '10px',
+                  fontFamily: 'inherit',
+                  resize: 'vertical'
+                }}
+                placeholder="Add a comment..."
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+              />
+              <div style={{ marginTop: '10px' }}>
+                <button
+                  className="primary-btn"
+                  onClick={handleCommentSubmit}
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? 'submitting...' : 'comment'}
+                </button>
+              </div>
+              <div 
+                className="comment-preview" 
+                style={{ 
+                  marginTop: '20px', 
+                  border: '1px solid #666', 
+                  borderRadius: '4px', 
+                  padding: '10px', 
+                  minHeight: '50px',
+                  color: '#ccc'
+                }}
               >
-                {isSubmitting ? 'submitting...' : 'comment'}
-              </button>
+                <div style={{ fontSize: '12px', color: '#888', marginBottom: '5px' }}>Preview</div>
+                <div dangerouslySetInnerHTML={renderMarkdown(commentText || '*No preview*')} />
+              </div>
             </div>
-            <div 
-              className="comment-preview" 
-              style={{ 
-                marginTop: '20px', 
-                border: '1px solid #666', 
-                borderRadius: '4px', 
-                padding: '10px', 
-                minHeight: '50px',
-                color: '#ccc'
-              }}
-            >
-              <div style={{ fontSize: '12px', color: '#888', marginBottom: '5px' }}>Preview</div>
-              <div dangerouslySetInnerHTML={renderMarkdown(commentText || '*No preview*')} />
-            </div>
-          </div>
+          )}
         </div>
 
         <div className="bug-metadata">

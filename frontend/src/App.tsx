@@ -34,7 +34,7 @@ const BugLoader: React.FC<BugLoaderProps> = ({ currentResult, setResult, usernam
 
       if (cachedBug && cachedBug.id === bugId) {
         // Optimization: Check state first for the "already cached" bug
-        api.get_bug_state(bugId).then((stateResult) => {
+        api.get_bug_state(username, bugId).then((stateResult: any) => {
           if (stateResult.ok && stateResult.val === cachedBug.state_id) {
             // State matches, no need to re-fetch
           } else {
@@ -51,7 +51,7 @@ const BugLoader: React.FC<BugLoaderProps> = ({ currentResult, setResult, usernam
 
   const fetchFullBug = (api: any, bugId: number) => {
     setLoading(true);
-    api.get_bug(bugId).then((result: Result<Bug, StatusError>) => {
+    api.get_bug(username, bugId).then((result: Result<Bug, StatusError>) => {
       setResult(result);
       setLoading(false);
     });
@@ -214,8 +214,8 @@ const App: React.FC = () => {
 
         <main className="content-area">
           <Routes>
-            <Route path="/" element={<HomeView onBugSelect={handleBugClick} />} />
-            <Route path="/home" element={<HomeView onBugSelect={handleBugClick} />} />
+            <Route path="/" element={<HomeView onBugSelect={handleBugClick} username={username} />} />
+            <Route path="/home" element={<HomeView onBugSelect={handleBugClick} username={username} />} />
             <Route path="/issue/:id" element={<BugLoader currentResult={bugResult} setResult={setBugResult} username={username} />} />
             <Route path="/login" element={<LoginView onLogin={handleLogin} />} />
           </Routes>

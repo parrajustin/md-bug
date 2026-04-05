@@ -59,6 +59,14 @@ pub fn generate_fake_data(root: &Path) {
             continue;
         }
 
+        let mut comment_access = vec![SafeEmail().fake()];
+        let mut view_access = vec![SafeEmail().fake()];
+        if rng.gen_bool(0.5) {
+            comment_access.push("PUBLIC".to_string());
+        } else {
+            view_access.push("PUBLIC".to_string());
+        }
+
         let metadata = BugMetadata {
             version: CURRENT_VERSION,
             id: bug_id,
@@ -74,8 +82,8 @@ pub fn generate_fake_data(root: &Path) {
             access: AccessMetadata {
                 version: CURRENT_VERSION,
                 full_access: vec![SafeEmail().fake()],
-                comment_access: vec![SafeEmail().fake()],
-                view_access: vec![SafeEmail().fake()],
+                comment_access,
+                view_access,
             },
             title: Sentence(3..8).fake(),
             folders,

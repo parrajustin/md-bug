@@ -6,8 +6,9 @@ import { type API, type Bug, type BugSummary, type SubmitCommentResponse, type C
 const BACKEND_URL = 'http://localhost:9000';
 
 export class BackendApi implements API {
-  async get_bug_list(query?: string): Promise<Result<BugSummary[], StatusError>> {
+  async get_bug_list(username: string, query?: string): Promise<Result<BugSummary[], StatusError>> {
     const url = new URL(`${BACKEND_URL}/api/bug_list`);
+    url.searchParams.append('u', username);
     if (query) url.searchParams.append('q', query);
     
     return WrapPromise(
@@ -20,9 +21,11 @@ export class BackendApi implements API {
     );
   }
 
-  async get_bug(id: number): Promise<Result<Bug, StatusError>> {
+  async get_bug(username: string, id: number): Promise<Result<Bug, StatusError>> {
+    const url = new URL(`${BACKEND_URL}/api/bug/${id}`);
+    url.searchParams.append('u', username);
     return WrapPromise(
-      fetch(`${BACKEND_URL}/api/bug/${id}`).then(async resp => {
+      fetch(url.toString()).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
         const text = await resp.text();
         return JSON.parse(text, bigIntReviver) as Bug;
@@ -31,23 +34,26 @@ export class BackendApi implements API {
     );
   }
 
-  async get_bug_state(id: number): Promise<Result<bigint, StatusError>> {
+  async get_bug_state(username: string, id: number): Promise<Result<bigint, StatusError>> {
+    const url = new URL(`${BACKEND_URL}/api/bug/${id}/state`);
+    url.searchParams.append('u', username);
     return WrapPromise(
-      fetch(`${BACKEND_URL}/api/bug/${id}/state`).then(async resp => {
+      fetch(url.toString()).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
         const text = await resp.text();
-        return bigIntReviver('state_id', text);
+        const json = JSON.parse(text, bigIntReviver);
+        return json.state_id;
       }),
       `Failed to fetch state for bug ${id}`
     );
   }
 
-  async submit_comment(id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>> {
+  async submit_comment(username: string, id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>> {
     return WrapPromise(
       fetch(`${BACKEND_URL}/api/bug/${id}/comment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ author, content }, bigIntReplacer)
+        body: JSON.stringify({ author, content, u: username }, bigIntReplacer)
       }).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
         const text = await resp.text();
@@ -57,12 +63,12 @@ export class BackendApi implements API {
     );
   }
 
-  async change_metadata(id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>> {
+  async change_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>> {
     return WrapPromise(
       fetch(`${BACKEND_URL}/api/bug/${id}/metadata`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field, value }, bigIntReplacer)
+        body: JSON.stringify({ field, value, u: username }, bigIntReplacer)
       }).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
         const text = await resp.text();

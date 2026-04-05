@@ -3,9 +3,10 @@ import { get_api, type BugSummary } from './api/api';
 
 interface HomeViewProps {
   onBugSelect: (id: number) => void;
+  username: string;
 }
 
-const HomeView: React.FC<HomeViewProps> = ({ onBugSelect }) => {
+const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username }) => {
   const [bugs, setBugs] = useState<BugSummary[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -14,7 +15,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect }) => {
     const fetchBugs = async () => {
       const apiResult = get_api();
       if (apiResult.ok) {
-        const result = await apiResult.val.get_bug_list();
+        const result = await apiResult.val.get_bug_list(username);
         if (result.ok) {
           setBugs(result.val);
         } else {
@@ -27,7 +28,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect }) => {
     };
 
     fetchBugs();
-  }, []);
+  }, [username]);
 
   if (loading) {
     return (

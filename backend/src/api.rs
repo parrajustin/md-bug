@@ -62,9 +62,32 @@ pub struct AccessMetadata {
     pub view_access: Vec<String>,
 }
 
+#[derive(Debug, PartialEq, PartialOrd)]
+pub enum UserAccessLevel {
+    None,
+    View,
+    Comment,
+    Full,
+}
+
 impl HasVersion for AccessMetadata {
     fn get_version(&self) -> u32 {
         self.version
+    }
+}
+
+impl BugMetadata {
+    pub fn access_level(&self, username: &str) -> UserAccessLevel {
+        if self.access.full_access.iter().any(|u| u == username || u == "PUBLIC") {
+            return UserAccessLevel::Full;
+        }
+        if self.access.comment_access.iter().any(|u| u == username || u == "PUBLIC") {
+            return UserAccessLevel::Comment;
+        }
+        if self.access.view_access.iter().any(|u| u == username || u == "PUBLIC") {
+            return UserAccessLevel::View;
+        }
+        UserAccessLevel::None
     }
 }
 
@@ -182,6 +205,15 @@ impl AppState {
 pub struct SearchQuery {
     /// Search term to match against title, assignee, or reporter.
     pub q: Option<String>,
+    /// The username of the user making the request.
+    pub u: String,
+}
+
+/// Query parameters for bug-specific requests.
+#[derive(SerdeDeserialize)]
+pub struct BugQuery {
+    /// The username of the user making the request.
+    pub u: String,
 }
 
 /// Retrieves a list of bugs matching the search criteria.
@@ -192,6 +224,7 @@ pub async fn get_bug_list(
 ) -> impl IntoResponse {
     let mut summaries = Vec::new();
     let q = query.q.unwrap_or_default().to_lowercase();
+    let u = query.u;
 
     for entry in WalkDir::new(&state.root)
         .into_iter()
@@ -210,6 +243,11 @@ pub async fn get_bug_list(
         
         // Requirement: bugs must have at least one component.
         if metadata.folders.is_empty() {
+            continue;
+        }
+
+        // Check view access
+        if metadata.access_level(&u) < UserAccessLevel::View {
             continue;
         }
 
@@ -233,6 +271,7 @@ pub async fn get_bug_list(
 pub async fn get_bug(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
+    Query(query): Query<BugQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let bug_path = find_bug_path(&state, id)
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -241,6 +280,10 @@ pub async fn get_bug(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let metadata: BugMetadata = read_versioned::<BugMetadata>(&metadata_data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if metadata.access_level(&query.u) < UserAccessLevel::View {
+        return Err(StatusCode::FORBIDDEN);
+    }
 
     let mut comments = Vec::new();
     if let Ok(dir) = fs::read_dir(&bug_path) {
@@ -278,6 +321,7 @@ pub struct BugStateResponse {
 pub async fn get_bug_state(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
+    Query(query): Query<BugQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let bug_path = find_bug_path(&state, id)
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -287,6 +331,10 @@ pub async fn get_bug_state(
     let metadata: BugMetadata = read_versioned::<BugMetadata>(&metadata_data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    if metadata.access_level(&query.u) < UserAccessLevel::View {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     Ok(Json(BugStateResponse { state_id: metadata.state_id }))
 }
 
@@ -295,6 +343,8 @@ pub async fn get_bug_state(
 pub struct CommentRequest {
     pub author: String,
     pub content: String,
+    /// The username of the user making the request (must match author).
+    pub u: String,
 }
 
 /// Response payload for submitting a new comment.
@@ -321,6 +371,10 @@ pub async fn submit_comment(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut metadata: BugMetadata = read_versioned::<BugMetadata>(&data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if metadata.access_level(&payload.u) < UserAccessLevel::Comment {
+        return Err(StatusCode::FORBIDDEN);
+    }
 
     metadata.state_id += 1;
     let new_state_id = metadata.state_id;
@@ -371,6 +425,8 @@ pub async fn submit_comment(
 pub struct MetadataChangeRequest {
     pub field: String,
     pub value: String,
+    /// The username of the user making the request.
+    pub u: String,
 }
 
 /// Response payload for changing bug metadata.
@@ -397,6 +453,10 @@ pub async fn change_metadata(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut metadata: BugMetadata = read_versioned::<BugMetadata>(&data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if metadata.access_level(&payload.u) < UserAccessLevel::Full {
+        return Err(StatusCode::FORBIDDEN);
+    }
 
     match payload.field.as_str() {
         "status" => metadata.status = payload.value,

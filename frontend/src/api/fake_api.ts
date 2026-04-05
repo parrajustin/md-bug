@@ -49,7 +49,7 @@ export class FakeApi implements API {
     }
   ];
 
-  async get_bug_list(query?: string): Promise<Result<BugSummary[], StatusError>> {
+  async get_bug_list(username: string, query?: string): Promise<Result<BugSummary[], StatusError>> {
     let bugs = this.mockBugs;
     if (query) {
       const q = query.toLowerCase();
@@ -58,7 +58,7 @@ export class FakeApi implements API {
     return Ok(bugs.map(b => ({ id: b.id, title: b.title })));
   }
 
-  async get_bug(id: number): Promise<Result<Bug, StatusError>> {
+  async get_bug(username: string, id: number): Promise<Result<Bug, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
     if (bug.metadata.state_id === undefined) bug.metadata.state_id = 1n;
@@ -66,13 +66,13 @@ export class FakeApi implements API {
     return Ok(bug);
   }
 
-  async get_bug_state(id: number): Promise<Result<bigint, StatusError>> {
+  async get_bug_state(username: string, id: number): Promise<Result<bigint, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
     return Ok(bug.state_id);
   }
 
-  async submit_comment(id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>> {
+  async submit_comment(username: string, id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
     const newId = bug.comments.length + 1;
@@ -91,7 +91,7 @@ export class FakeApi implements API {
     });
   }
 
-  async change_metadata(id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>> {
+  async change_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
     bug.metadata.state_id = (bug.metadata.state_id || 1n) + 1n;
