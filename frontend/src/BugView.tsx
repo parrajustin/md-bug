@@ -11,9 +11,10 @@ interface BugViewProps {
   bug: Bug;
   onHome: () => void;
   onRefresh: (id: number, updatedBug?: Bug) => void;
+  username: string;
 }
 
-const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh }) => {
+const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, username }) => {
   const [bug, setBug] = useState<Bug>(initialBug);
   const [commentText, setCommentText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -60,7 +61,7 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh })
     if (!apiResult.ok) return;
 
     setIsSubmitting(true);
-    const result = await apiResult.val.submit_comment(bug.id, 'current_user', commentText);
+    const result = await apiResult.val.submit_comment(bug.id, username, commentText);
     
     if (result.ok) {
       const response = result.val;
@@ -70,7 +71,7 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh })
         const newComment: Comment = {
           version: 1,
           id: response.comment_id,
-          author: 'current_user',
+          author: username,
           epoch_nanoseconds: BigInt(Date.now()) * 1000000n,
           content: commentText,
         };

@@ -5,14 +5,17 @@ import BugView from './BugView';
 import HomeView from './HomeView';
 import { type Result } from 'standard-ts-lib/src/result';
 import { StatusError } from 'standard-ts-lib/src/status_error';
+import { storage } from './api/storage';
+import LoginView from './LoginView';
 import './styles.css';
 
 interface BugLoaderProps {
   currentResult: Result<Bug, StatusError> | null;
   setResult: (result: Result<Bug, StatusError> | null) => void;
+  username: string;
 }
 
-const BugLoader: React.FC<BugLoaderProps> = ({ currentResult, setResult }) => {
+const BugLoader: React.FC<BugLoaderProps> = ({ currentResult, setResult, username }) => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [loading, setLoading] = useState<boolean>(false);
@@ -77,6 +80,7 @@ const BugLoader: React.FC<BugLoaderProps> = ({ currentResult, setResult }) => {
       <BugView 
         bug={currentResult.val} 
         onHome={() => navigate('/')} 
+        username={username}
         onRefresh={(id, updatedBug) => {
           if (updatedBug) {
             setResult({ ok: true, val: updatedBug } as Result<Bug, StatusError>);
@@ -98,10 +102,38 @@ const App: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [bugResult, setBugResult] = useState<Result<Bug, StatusError> | null>(null);
+  const [username, setUsername] = useState<string | null>(null);
+  const [checkingUsername, setCheckingUsername] = useState(true);
+
+  useEffect(() => {
+    storage.getUsername().then(result => {
+      if (result.ok && result.val.some) {
+        setUsername(result.val.safeValue());
+      }
+      setCheckingUsername(false);
+    });
+  }, []);
 
   const handleBugClick = (id: number) => {
     navigate(`/issue/${id}`);
   };
+
+  const handleLogin = (name: string) => {
+    setUsername(name);
+    navigate('/');
+  };
+
+  if (checkingUsername) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#000', color: 'white' }}>
+        Loading...
+      </div>
+    );
+  }
+
+  if (!username) {
+    return <LoginView onLogin={handleLogin} />;
+  }
 
   return (
     <div className="layout">
@@ -113,7 +145,9 @@ const App: React.FC = () => {
         <div className="search-container">
           <input type="text" placeholder="Search bugs..." />
         </div>
-        <div style={{ width: '240px', textAlign: 'right', paddingRight: '20px' }}>👤</div>
+        <div style={{ width: '240px', textAlign: 'right', paddingRight: '20px', color: '#888', fontSize: '14px' }}>
+          {username} 👤
+        </div>
       </header>
 
       <div className="main-container">
@@ -141,7 +175,8 @@ const App: React.FC = () => {
           <Routes>
             <Route path="/" element={<HomeView onBugSelect={handleBugClick} />} />
             <Route path="/home" element={<HomeView onBugSelect={handleBugClick} />} />
-            <Route path="/issue/:id" element={<BugLoader currentResult={bugResult} setResult={setBugResult} />} />
+            <Route path="/issue/:id" element={<BugLoader currentResult={bugResult} setResult={setBugResult} username={username} />} />
+            <Route path="/login" element={<LoginView onLogin={handleLogin} />} />
           </Routes>
         </main>
       </div>
