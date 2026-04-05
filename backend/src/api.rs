@@ -353,6 +353,46 @@ pub async fn get_component_metadata(
     Ok(Json(resolved))
 }
 
+/// Retrieves a list of all components (folders) in the system.
+pub async fn get_component_list(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BugQuery>,
+) -> impl IntoResponse {
+    let mut components = std::collections::HashSet::new();
+
+    for entry in WalkDir::new(&state.root)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_dir())
+    {
+        let path = entry.path();
+        if path == state.root {
+            continue;
+        }
+
+        let file_name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n,
+            None => continue,
+        };
+
+        // Skip bug ID folders and hidden folders
+        if file_name.parse::<u64>().is_ok() || file_name.starts_with("__") {
+            continue;
+        }
+
+        if let Ok(relative_path) = path.strip_prefix(&state.root) {
+            let path_str = relative_path.to_string_lossy().replace('\\', "/");
+            if !path_str.is_empty() {
+                components.insert(path_str);
+            }
+        }
+    }
+
+    let mut list: Vec<String> = components.into_iter().collect();
+    list.sort();
+    Json(list)
+}
+
 /// Retrieves a list of bugs matching the search criteria.
 /// Requires bugs to have at least one component (folder).
 pub async fn get_bug_list(

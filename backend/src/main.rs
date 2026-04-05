@@ -74,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/bug/:id/comment", post(api::submit_comment))
         .route("/api/bug/:id/metadata", post(api::change_metadata))
         .route("/api/component_metadata", get(api::get_component_metadata))
+        .route("/api/component_list", get(api::get_component_list))
         .fallback_service(
             ServeDir::new(&args.frontend_dir)
                 .not_found_service(ServeFile::new(index_file))

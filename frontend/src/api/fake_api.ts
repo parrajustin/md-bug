@@ -130,6 +130,18 @@ export class FakeApi implements API {
       created_at: 1718016000000000000n
     });
   }
+
+  async get_component_list(username: string): Promise<Result<string[], StatusError>> {
+    const components = new Set<string>();
+    this.mockBugs.forEach(bug => {
+      let path = "";
+      bug.folders.forEach(folder => {
+        path = path ? `${path}/${folder}` : folder;
+        components.add(path);
+      });
+    });
+    return Ok(Array.from(components).sort());
+  }
 }
 
 export const fakeApi = new FakeApi();

@@ -91,4 +91,17 @@ export class BackendApi implements API {
       'Failed to fetch component metadata'
     );
   }
+
+  async get_component_list(username: string): Promise<Result<string[], StatusError>> {
+    const url = new URL(`${BACKEND_URL}/api/component_list`);
+    url.searchParams.append('u', username);
+    return WrapPromise(
+      fetch(url.toString()).then(async resp => {
+        if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
+        const text = await resp.text();
+        return JSON.parse(text, bigIntReviver) as string[];
+      }),
+      'Failed to fetch component list'
+    );
+  }
 }

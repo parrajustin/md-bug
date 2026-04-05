@@ -134,6 +134,7 @@ export interface API {
   submit_comment(username: string, id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>>;
   change_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>>;
   get_component_metadata(username: string, path: string): Promise<Result<ComponentMetadata, StatusError>>;
+  get_component_list(username: string): Promise<Result<string[], StatusError>>;
 }
 
 let api_singleton: Optional<API> = None;
