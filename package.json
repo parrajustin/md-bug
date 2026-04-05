@@ -1,0 +1,19 @@
+{
+  "name": "md-bug",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "concurrently \"nodemon --watch backend/src -e rs --exec \\\"cd backend && cargo run -- -r ./bug-data -p 9000\\\"\" \"cd frontend && npm run watch-dev\"",
+    "dev": "npm start",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.29.3",
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "nodemon": "^3.1.14"
+  }
+}

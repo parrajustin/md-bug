@@ -6,6 +6,7 @@
   "scripts": {
     "build": "esbuild src/index.tsx --bundle --outfile=public/bundle.js --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css --minify --define:USE_FAKE_API=false",
     "build-dev": "esbuild src/index.tsx --bundle --outfile=public/bundle.js --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css --define:USE_FAKE_API=false",
+    "watch-dev": "esbuild src/index.tsx --bundle --outfile=public/bundle.js --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css --define:USE_FAKE_API=false --watch",
     "fakeapi-build": "esbuild src/index.tsx --bundle --outfile=public/bundle.js --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css --minify --define:USE_FAKE_API=true",
     "serve": "npx serve public"
   },
