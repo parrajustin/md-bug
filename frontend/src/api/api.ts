@@ -23,6 +23,21 @@ export interface AccessMetadata {
   view_access: string[];
 }
 
+export interface ComponentMetadata {
+  version: number;
+  creator: string;
+  bug_type?: string;
+  priority?: string;
+  severity?: string;
+  verifier?: string;
+  collaborators: string[];
+  cc: string[];
+  admins: string[];
+  access: AccessMetadata;
+  user_metadata: UserMetadataEntry[];
+  created_at: bigint;
+}
+
 export interface BugMetadata {
   version: number;
   id: number;
@@ -118,6 +133,7 @@ export interface API {
   get_bug_state(username: string, id: number): Promise<Result<bigint, StatusError>>;
   submit_comment(username: string, id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>>;
   change_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>>;
+  get_component_metadata(username: string, path: string): Promise<Result<ComponentMetadata, StatusError>>;
 }
 
 let api_singleton: Optional<API> = None;

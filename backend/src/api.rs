@@ -61,6 +61,88 @@ pub struct AccessMetadata {
     pub view_access: Vec<String>,
 }
 
+/// Represents metadata for a component (folder).
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
+#[archive(check_bytes)]
+pub struct ComponentMetadata {
+    pub version: u32,
+    pub creator: String,
+    pub bug_type: Option<String>,
+    pub priority: Option<String>,
+    pub severity: Option<String>,
+    pub verifier: Option<String>,
+    pub collaborators: Vec<String>,
+    pub cc: Vec<String>,
+    pub admins: Vec<String>,
+    pub access: AccessMetadata,
+    pub user_metadata: Vec<UserMetadataEntry>,
+    #[serde(serialize_with = "serialize_u64_as_string_n")]
+    pub created_at: u64,
+}
+
+impl HasVersion for ComponentMetadata {
+    fn get_version(&self) -> u32 {
+        self.version
+    }
+}
+
+impl Default for AccessMetadata {
+    fn default() -> Self {
+        Self {
+            version: CURRENT_VERSION,
+            full_access: vec![],
+            comment_access: vec![],
+            view_access: vec![],
+        }
+    }
+}
+
+impl ComponentMetadata {
+    pub fn empty() -> Self {
+        Self {
+            version: CURRENT_VERSION,
+            creator: "".to_string(),
+            bug_type: None,
+            priority: None,
+            severity: None,
+            verifier: None,
+            collaborators: vec![],
+            cc: vec![],
+            admins: vec![],
+            access: AccessMetadata::default(),
+            user_metadata: vec![],
+            created_at: 0,
+        }
+    }
+
+    /// Merges this metadata with a child's metadata, with the child taking precedence.
+    pub fn merge(&self, child: &ComponentMetadata) -> ComponentMetadata {
+        let mut merged = self.clone();
+        if !child.creator.is_empty() { merged.creator = child.creator.clone(); }
+        if child.bug_type.is_some() { merged.bug_type = child.bug_type.clone(); }
+        if child.priority.is_some() { merged.priority = child.priority.clone(); }
+        if child.severity.is_some() { merged.severity = child.severity.clone(); }
+        if child.verifier.is_some() { merged.verifier = child.verifier.clone(); }
+        
+        // For lists, we'll overwrite if the child has any entries for now.
+        // This is a simple policy that can be refined.
+        if !child.collaborators.is_empty() { merged.collaborators = child.collaborators.clone(); }
+        if !child.cc.is_empty() { merged.cc = child.cc.clone(); }
+        if !child.admins.is_empty() { merged.admins = child.admins.clone(); }
+        
+        // Merge access lists? Usually admins at higher levels should keep access.
+        // But for specific access lists, child usually overwrites.
+        if !child.access.full_access.is_empty() { merged.access.full_access = child.access.full_access.clone(); }
+        if !child.access.comment_access.is_empty() { merged.access.comment_access = child.access.comment_access.clone(); }
+        if !child.access.view_access.is_empty() { merged.access.view_access = child.access.view_access.clone(); }
+
+        if !child.user_metadata.is_empty() { merged.user_metadata = child.user_metadata.clone(); }
+        if child.created_at > 0 { merged.created_at = child.created_at; }
+        
+        merged
+    }
+}
+
 #[derive(Debug, PartialEq, PartialOrd)]
 pub enum UserAccessLevel {
     None,
@@ -76,7 +158,15 @@ impl HasVersion for AccessMetadata {
 }
 
 impl BugMetadata {
-    pub fn access_level(&self, username: &str) -> UserAccessLevel {
+    pub fn access_level(&self, root: &std::path::Path, username: &str) -> UserAccessLevel {
+        // 1. Check if user is a component admin at any level of the hierarchy
+        let path_str = self.folders.join("/");
+        let resolved_meta = resolve_component_metadata(root, &path_str);
+        if resolved_meta.admins.iter().any(|u| u == username) {
+            return UserAccessLevel::Full;
+        }
+
+        // 2. Check bug-specific access lists
         if self.access.full_access.iter().any(|u| u == username || u == "PUBLIC") {
             return UserAccessLevel::Full;
         }
@@ -215,6 +305,54 @@ pub struct BugQuery {
     pub u: String,
 }
 
+/// Query parameters for component metadata requests.
+#[derive(SerdeDeserialize)]
+pub struct ComponentQuery {
+    /// The hierarchical path of the component (e.g., "google/sxs").
+    pub path: String,
+    /// The username of the user making the request.
+    pub u: String,
+}
+
+/// Resolves the metadata for a component path by merging from root downwards.
+pub fn resolve_component_metadata(root: &std::path::Path, path: &str) -> ComponentMetadata {
+    let mut resolved = ComponentMetadata::empty();
+    
+    let mut current_path = root.to_path_buf();
+    let components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+
+    // Start with root metadata if it exists
+    let root_meta_file = root.join("component_metadata");
+    if let Ok(data) = fs::read(&root_meta_file) {
+        if let Ok(meta) = read_versioned::<ComponentMetadata>(&data) {
+            resolved = meta;
+        }
+    }
+
+    for comp in components {
+        current_path.push(comp);
+        let meta_file = current_path.join("component_metadata");
+        if let Ok(data) = fs::read(&meta_file) {
+            if let Ok(meta) = read_versioned::<ComponentMetadata>(&data) {
+                resolved = resolved.merge(&meta);
+            }
+        }
+    }
+
+    resolved
+}
+
+/// Retrieves the resolved metadata for a specific component.
+pub async fn get_component_metadata(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ComponentQuery>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let resolved = resolve_component_metadata(&state.root, &query.path);
+    
+    // Check view access, components are always visible to everyone.
+    Ok(Json(resolved))
+}
+
 /// Retrieves a list of bugs matching the search criteria.
 /// Requires bugs to have at least one component (folder).
 pub async fn get_bug_list(
@@ -246,7 +384,7 @@ pub async fn get_bug_list(
         }
 
         // Check view access
-        if metadata.access_level(&u) < UserAccessLevel::View {
+        if metadata.access_level(&state.root, &u) < UserAccessLevel::View {
             continue;
         }
 
@@ -280,7 +418,7 @@ pub async fn get_bug(
     let metadata: BugMetadata = read_versioned::<BugMetadata>(&metadata_data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if metadata.access_level(&query.u) < UserAccessLevel::View {
+    if metadata.access_level(&state.root, &query.u) < UserAccessLevel::View {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -330,7 +468,7 @@ pub async fn get_bug_state(
     let metadata: BugMetadata = read_versioned::<BugMetadata>(&metadata_data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if metadata.access_level(&query.u) < UserAccessLevel::View {
+    if metadata.access_level(&state.root, &query.u) < UserAccessLevel::View {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -371,7 +509,7 @@ pub async fn submit_comment(
     let mut metadata: BugMetadata = read_versioned::<BugMetadata>(&data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if metadata.access_level(&payload.u) < UserAccessLevel::Comment {
+    if metadata.access_level(&state.root, &payload.u) < UserAccessLevel::Comment {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -453,7 +591,7 @@ pub async fn change_metadata(
     let mut metadata: BugMetadata = read_versioned::<BugMetadata>(&data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if metadata.access_level(&payload.u) < UserAccessLevel::Full {
+    if metadata.access_level(&state.root, &payload.u) < UserAccessLevel::Full {
         return Err(StatusCode::FORBIDDEN);
     }
 

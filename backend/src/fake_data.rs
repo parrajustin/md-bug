@@ -5,7 +5,7 @@ use fake::Fake;
 use fake::faker::lorem::en::{Sentence, Paragraph};
 use fake::faker::internet::en::SafeEmail;
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::api::{BugMetadata, Comment, AccessMetadata, CURRENT_VERSION};
+use crate::api::{BugMetadata, Comment, AccessMetadata, ComponentMetadata, CURRENT_VERSION};
 use walkdir::WalkDir;
 
 pub fn generate_fake_data(root: &Path) {
@@ -48,10 +48,43 @@ pub fn generate_fake_data(root: &Path) {
             folders.push(comp);
         }
 
-        let mut bug_path = root.to_path_buf();
+        let mut current_path = root.to_path_buf();
         for f in &folders {
-            bug_path.push(f);
+            current_path.push(f);
+            if let Err(e) = fs::create_dir_all(&current_path) {
+                eprintln!("Failed to create component directory: {}", e);
+                continue;
+            }
+
+            // 50/50 chance to create component metadata if it doesn't exist
+            let meta_file = current_path.join("component_metadata");
+            if !meta_file.exists() {
+                let comp_meta = ComponentMetadata {
+                    version: CURRENT_VERSION,
+                    creator: SafeEmail().fake(),
+                    bug_type: Some(types[rng.gen_range(0..types.len())].to_string()),
+                    priority: Some(priorities[rng.gen_range(0..priorities.len())].to_string()),
+                    severity: Some(severities[rng.gen_range(0..severities.len())].to_string()),
+                    verifier: Some(SafeEmail().fake()),
+                    collaborators: vec![SafeEmail().fake()],
+                    cc: vec![SafeEmail().fake()],
+                    admins: vec![SafeEmail().fake()],
+                    access: AccessMetadata {
+                        version: CURRENT_VERSION,
+                        full_access: vec![],
+                        comment_access: vec!["PUBLIC".to_string()],
+                        view_access: vec![],
+                    },
+                    user_metadata: vec![],
+                    created_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0),
+                };
+                if let Ok(bytes) = rkyv::to_bytes::<_, 1024>(&comp_meta) {
+                    let _ = fs::write(meta_file, bytes);
+                }
+            }
         }
+
+        let mut bug_path = current_path.clone();
         bug_path.push(bug_id.to_string());
 
         if let Err(e) = fs::create_dir_all(&bug_path) {

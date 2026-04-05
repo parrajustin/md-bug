@@ -109,6 +109,27 @@ export class FakeApi implements API {
       state_id: bug.metadata.state_id
     });
   }
+
+  async get_component_metadata(username: string, path: string): Promise<Result<ComponentMetadata, StatusError>> {
+    return Ok({
+      version: 1,
+      creator: "admin@example.com",
+      bug_type: "Bug",
+      priority: "P2",
+      severity: "S2",
+      collaborators: [],
+      cc: [],
+      admins: ["admin@example.com"],
+      access: {
+        version: 1,
+        full_access: [],
+        comment_access: ["PUBLIC"],
+        view_access: []
+      },
+      user_metadata: [],
+      created_at: 1718016000000000000n
+    });
+  }
 }
 
 export const fakeApi = new FakeApi();

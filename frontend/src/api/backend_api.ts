@@ -77,4 +77,18 @@ export class BackendApi implements API {
       'Failed to change metadata'
     );
   }
+
+  async get_component_metadata(username: string, path: string): Promise<Result<ComponentMetadata, StatusError>> {
+    const url = new URL(`${BACKEND_URL}/api/component_metadata`);
+    url.searchParams.append('u', username);
+    url.searchParams.append('path', path);
+    return WrapPromise(
+      fetch(url.toString()).then(async resp => {
+        if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
+        const text = await resp.text();
+        return JSON.parse(text, bigIntReviver) as ComponentMetadata;
+      }),
+      'Failed to fetch component metadata'
+    );
+  }
 }
