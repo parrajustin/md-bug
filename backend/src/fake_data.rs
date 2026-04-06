@@ -60,6 +60,9 @@ pub fn generate_fake_data(root: &Path) {
             // 50/50 chance to create component metadata if it doesn't exist
             let meta_file = current_path.join("component_metadata");
             if !meta_file.exists() && rng.gen_bool(0.5) {
+                let mut templates = HashMap::new();
+                templates.insert("".to_string(), crate::api::BugTemplate::default());
+
                 let comp_meta = ComponentMetadata {
                     version: CURRENT_VERSION,
                     name: f.clone(),
@@ -80,6 +83,8 @@ pub fn generate_fake_data(root: &Path) {
                         });
                         g
                     }},
+                    templates,
+                    default_template: "".to_string(),
                     user_metadata: vec![],
                     created_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0),
                 };

@@ -113,19 +113,32 @@ export class FakeApi implements API {
   async get_component_metadata(username: string, path: string): Promise<Result<ComponentMetadata, StatusError>> {
     return Ok({
       version: 1,
+      name: path.split('/').pop() || "",
+      description: `Description for ${path}`,
       creator: "admin@example.com",
       bug_type: "Bug",
       priority: "P2",
       severity: "S2",
       collaborators: [],
       cc: [],
-      admins: ["admin@example.com"],
-      access: {
-        version: 1,
-        full_access: [],
-        comment_access: ["PUBLIC"],
-        view_access: []
+      access_control: {
+        groups: {
+          "Component Admins": {
+            permissions: ["ComponentAdmin", "ViewIssues"],
+            view_level: 999,
+            members: ["admin@example.com"]
+          }
+        }
       },
+      templates: {
+        "": {
+          name: "",
+          description: "",
+          collaborators: [],
+          cc: []
+        }
+      },
+      default_template: "",
       user_metadata: [],
       created_at: 1718016000000000000n
     });
@@ -141,6 +154,18 @@ export class FakeApi implements API {
       });
     });
     return Ok(Array.from(components).sort());
+  }
+
+  async add_template(username: string, path: string, template: BugTemplate): Promise<Result<void, StatusError>> {
+    return Ok(undefined);
+  }
+
+  async modify_template(username: string, path: string, old_name: string, template: BugTemplate): Promise<Result<void, StatusError>> {
+    return Ok(undefined);
+  }
+
+  async delete_template(username: string, path: string, name: string): Promise<Result<void, StatusError>> {
+    return Ok(undefined);
   }
 }
 

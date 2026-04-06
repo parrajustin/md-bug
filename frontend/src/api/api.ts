@@ -23,8 +23,35 @@ export interface AccessMetadata {
   view_access: string[];
 }
 
+export interface BugTemplate {
+  name: string;
+  description: string;
+  title?: string;
+  type?: string;
+  priority?: string;
+  severity?: string;
+  hotlist?: string;
+  assignee?: string;
+  verifier?: string;
+  collaborators: string[];
+  cc: string[];
+  comment?: string;
+}
+
+export interface GroupPermissions {
+  permissions: string[];
+  view_level: number;
+  members: string[];
+}
+
+export interface AccessControl {
+  groups: { [name: string]: GroupPermissions };
+}
+
 export interface ComponentMetadata {
   version: number;
+  name: string;
+  description: string;
   creator: string;
   bug_type?: string;
   priority?: string;
@@ -32,8 +59,9 @@ export interface ComponentMetadata {
   verifier?: string;
   collaborators: string[];
   cc: string[];
-  admins: string[];
-  access: AccessMetadata;
+  access_control: AccessControl;
+  templates: { [name: string]: BugTemplate };
+  default_template: string;
   user_metadata: UserMetadataEntry[];
   created_at: bigint;
 }
@@ -135,6 +163,9 @@ export interface API {
   change_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>>;
   get_component_metadata(username: string, path: string): Promise<Result<ComponentMetadata, StatusError>>;
   get_component_list(username: string): Promise<Result<string[], StatusError>>;
+  add_template(username: string, path: string, template: BugTemplate): Promise<Result<void, StatusError>>;
+  modify_template(username: string, path: string, old_name: string, template: BugTemplate): Promise<Result<void, StatusError>>;
+  delete_template(username: string, path: string, name: string): Promise<Result<void, StatusError>>;
 }
 
 let api_singleton: Optional<API> = None;

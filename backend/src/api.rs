@@ -86,6 +86,25 @@ pub struct AccessControl {
     pub groups: HashMap<String, GroupPermissions>,
 }
 
+/// Represents a template for creating new bugs.
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq, Default)]
+#[archive(check_bytes)]
+pub struct BugTemplate {
+    pub name: String,
+    pub description: String,
+    pub title: Option<String>,
+    #[serde(rename = "type")]
+    pub bug_type: Option<String>,
+    pub priority: Option<String>,
+    pub severity: Option<String>,
+    pub hotlist: Option<String>,
+    pub assignee: Option<String>,
+    pub verifier: Option<String>,
+    pub collaborators: Vec<String>,
+    pub cc: Vec<String>,
+    pub comment: Option<String>,
+}
+
 /// Represents metadata for a component (folder).
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
 #[archive(check_bytes)]
@@ -101,6 +120,8 @@ pub struct ComponentMetadata {
     pub collaborators: Vec<String>,
     pub cc: Vec<String>,
     pub access_control: AccessControl,
+    pub templates: HashMap<String, BugTemplate>,
+    pub default_template: String,
     pub user_metadata: Vec<UserMetadataEntry>,
     #[serde(serialize_with = "serialize_u64_as_string_n")]
     pub created_at: u64,
@@ -125,6 +146,8 @@ impl Default for AccessMetadata {
 
 impl ComponentMetadata {
     pub fn empty() -> Self {
+        let mut templates = HashMap::new();
+        templates.insert("".to_string(), BugTemplate::default());
         Self {
             version: CURRENT_VERSION,
             name: "".to_string(),
@@ -137,6 +160,8 @@ impl ComponentMetadata {
             collaborators: vec![],
             cc: vec![],
             access_control: AccessControl::default(),
+            templates,
+            default_template: "".to_string(),
             user_metadata: vec![],
             created_at: 0,
         }
@@ -171,6 +196,14 @@ impl ComponentMetadata {
         // Child groups with same name overwrite parent groups.
         for (name, perms) in &child.access_control.groups {
             merged.access_control.groups.insert(name.clone(), perms.clone());
+        }
+
+        // Merge templates
+        for (name, template) in &child.templates {
+            merged.templates.insert(name.clone(), template.clone());
+        }
+        if !child.default_template.is_empty() {
+            merged.default_template = child.default_template.clone();
         }
 
         if !child.user_metadata.is_empty() { merged.user_metadata = child.user_metadata.clone(); }
@@ -512,6 +545,9 @@ pub async fn create_component(
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let mut templates = HashMap::new();
+    templates.insert("".to_string(), BugTemplate::default());
+
     let meta = ComponentMetadata {
         version: CURRENT_VERSION,
         name: payload.name,
@@ -524,6 +560,8 @@ pub async fn create_component(
         collaborators: vec![],
         cc: vec![],
         access_control: AccessControl { groups },
+        templates,
+        default_template: "".to_string(),
         user_metadata: vec![],
         created_at: now.as_nanos() as u64,
     };
@@ -533,6 +571,142 @@ pub async fn create_component(
 
     Ok(StatusCode::CREATED)
 }
+
+/// Request payload for adding or modifying a template.
+#[derive(SerdeDeserialize)]
+pub struct TemplateRequest {
+    pub u: String,
+    pub path: String,
+    pub template: BugTemplate,
+}
+
+/// Adds a new template to a component.
+pub async fn add_template(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<TemplateRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let component_path = state.root.join(payload.path.replace('/', std::path::MAIN_SEPARATOR_STR));
+    let meta_file = component_path.join("component_metadata");
+
+    if !meta_file.exists() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let data = fs::read(&meta_file).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if !meta.has_permission(&payload.u, &Permission::ComponentAdmin) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    if payload.template.name.is_empty() {
+        return Err(StatusCode::BAD_REQUEST); // Cannot add another "default" template this way
+    }
+
+    if meta.templates.contains_key(&payload.template.name) {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    meta.templates.insert(payload.template.name.clone(), payload.template);
+
+    let bytes = rkyv::to_bytes::<_, 2048>(&meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    fs::write(&meta_file, bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::OK)
+}
+
+/// Request payload for modifying a template.
+#[derive(SerdeDeserialize)]
+pub struct ModifyTemplateRequest {
+    pub u: String,
+    pub path: String,
+    pub old_name: String,
+    pub template: BugTemplate,
+}
+
+/// Modifies an existing template.
+pub async fn modify_template(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<ModifyTemplateRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let component_path = state.root.join(payload.path.replace('/', std::path::MAIN_SEPARATOR_STR));
+    let meta_file = component_path.join("component_metadata");
+
+    if !meta_file.exists() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let data = fs::read(&meta_file).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if !meta.has_permission(&payload.u, &Permission::ComponentAdmin) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    if !meta.templates.contains_key(&payload.old_name) {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    // "can't rename the 'default template'"
+    if payload.old_name.is_empty() && payload.template.name != "" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    // If renaming, check for conflict
+    if payload.old_name != payload.template.name && meta.templates.contains_key(&payload.template.name) {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    meta.templates.remove(&payload.old_name);
+    meta.templates.insert(payload.template.name.clone(), payload.template);
+
+    let bytes = rkyv::to_bytes::<_, 2048>(&meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    fs::write(&meta_file, bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::OK)
+}
+
+/// Request payload for deleting a template.
+#[derive(SerdeDeserialize)]
+pub struct DeleteTemplateRequest {
+    pub u: String,
+    pub path: String,
+    pub name: String,
+}
+
+/// Deletes a template from a component.
+pub async fn delete_template(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<DeleteTemplateRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let component_path = state.root.join(payload.path.replace('/', std::path::MAIN_SEPARATOR_STR));
+    let meta_file = component_path.join("component_metadata");
+
+    if !meta_file.exists() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let data = fs::read(&meta_file).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if !meta.has_permission(&payload.u, &Permission::ComponentAdmin) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    if payload.name.is_empty() {
+        return Err(StatusCode::BAD_REQUEST); // "can't delete the 'default template'"
+    }
+
+    if meta.templates.remove(&payload.name).is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let bytes = rkyv::to_bytes::<_, 2048>(&meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    fs::write(&meta_file, bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::OK)
+}
+
 
 /// Retrieves the resolved metadata for a specific component.
 pub async fn get_component_metadata(

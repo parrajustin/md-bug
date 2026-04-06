@@ -104,4 +104,43 @@ export class BackendApi implements API {
       'Failed to fetch component list'
     );
   }
+
+  async add_template(username: string, path: string, template: BugTemplate): Promise<Result<void, StatusError>> {
+    return WrapPromise(
+      fetch(`${BACKEND_URL}/api/add_template`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ u: username, path, template }, bigIntReplacer)
+      }).then(async resp => {
+        if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
+      }),
+      'Failed to add template'
+    );
+  }
+
+  async modify_template(username: string, path: string, old_name: string, template: BugTemplate): Promise<Result<void, StatusError>> {
+    return WrapPromise(
+      fetch(`${BACKEND_URL}/api/modify_template`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ u: username, path, old_name, template }, bigIntReplacer)
+      }).then(async resp => {
+        if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
+      }),
+      'Failed to modify template'
+    );
+  }
+
+  async delete_template(username: string, path: string, name: string): Promise<Result<void, StatusError>> {
+    return WrapPromise(
+      fetch(`${BACKEND_URL}/api/delete_template`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ u: username, path, name }, bigIntReplacer)
+      }).then(async resp => {
+        if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
+      }),
+      'Failed to delete template'
+    );
+  }
 }

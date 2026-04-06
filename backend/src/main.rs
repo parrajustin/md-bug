@@ -76,6 +76,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/component_metadata", get(api::get_component_metadata))
         .route("/api/component_list", get(api::get_component_list))
         .route("/api/create_component", post(api::create_component))
+        .route("/api/add_template", post(api::add_template))
+        .route("/api/modify_template", post(api::modify_template))
+        .route("/api/delete_template", post(api::delete_template))
         .fallback_service(
             ServeDir::new(&args.frontend_dir)
                 .not_found_service(ServeFile::new(index_file))
