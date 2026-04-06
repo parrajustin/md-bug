@@ -411,18 +411,20 @@ fn sanitize_name(name: &str) -> String {
         .collect()
 }
 
-/// Creates a new component.
+/// Creates a new component. 
+/// NOTE: Creating components at the root level via the API is strictly banned and not a valid call.
+/// All components must be created under an existing parent component.
 pub async fn create_component(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<CreateComponentRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    // Creating a component at the root is not allowed!
+    // CRITICAL: Creating a component at the root level via the API is explicitly banned.
+    // This is a hard restriction to ensure hierarchical integrity.
     if payload.parent.is_empty() {
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let parent_path = 
-        state.root.join(payload.parent.replace('/', std::path::MAIN_SEPARATOR_STR));
+    let parent_path = state.root.join(payload.parent.replace('/', std::path::MAIN_SEPARATOR_STR));
 
     if !parent_path.exists() {
         return Err(StatusCode::NOT_FOUND);
@@ -464,19 +466,23 @@ pub async fn create_component(
 
     fs::create_dir_all(&component_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let mut groups = HashMap::new();
+    let mut groups = parent_meta.access_control.groups.clone();
     
-    // Default groups
-    groups.insert("Component Admins".to_string(), GroupPermissions {
+    // Ensure creator is in "Component Admins"
+    let admins = groups.entry("Component Admins".to_string()).or_insert_with(|| GroupPermissions {
         permissions: vec![
             Permission::ComponentAdmin, Permission::CreateIssues, Permission::AdminIssues,
             Permission::EditIssues, Permission::CommentOnIssues, Permission::ViewIssues
         ],
         view_level: 999,
-        members: vec![payload.u.clone()],
+        members: vec![],
     });
+    if !admins.members.contains(&payload.u) {
+        admins.members.push(payload.u.clone());
+    }
 
-    groups.insert("Issue Admins".to_string(), GroupPermissions {
+    // Ensure other defaults exist
+    groups.entry("Issue Admins".to_string()).or_insert_with(|| GroupPermissions {
         permissions: vec![
             Permission::CreateIssues, Permission::AdminIssues,
             Permission::EditIssues, Permission::CommentOnIssues, Permission::ViewIssues
@@ -485,7 +491,7 @@ pub async fn create_component(
         members: vec![],
     });
 
-    groups.insert("Issue Editors".to_string(), GroupPermissions {
+    groups.entry("Issue Editors".to_string()).or_insert_with(|| GroupPermissions {
         permissions: vec![
             Permission::CreateIssues, Permission::EditIssues, 
             Permission::CommentOnIssues, Permission::ViewIssues
@@ -494,7 +500,7 @@ pub async fn create_component(
         members: vec![],
     });
 
-    groups.insert("Issue Contributors".to_string(), GroupPermissions {
+    groups.entry("Issue Contributors".to_string()).or_insert_with(|| GroupPermissions {
         permissions: vec![
             Permission::CreateIssues, Permission::CommentOnIssues, Permission::ViewIssues
         ],
@@ -542,7 +548,7 @@ pub async fn get_component_metadata(
 /// Retrieves a list of all components (folders) in the system.
 pub async fn get_component_list(
     State(state): State<Arc<AppState>>,
-    Query(query): Query<BugQuery>,
+    Query(_query): Query<BugQuery>,
 ) -> impl IntoResponse {
     let mut components = std::collections::HashSet::new();
 

@@ -5,7 +5,8 @@ use fake::Fake;
 use fake::faker::lorem::en::{Sentence, Paragraph};
 use fake::faker::internet::en::SafeEmail;
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::api::{BugMetadata, Comment, AccessMetadata, ComponentMetadata, CURRENT_VERSION};
+use std::collections::HashMap;
+use crate::api::{BugMetadata, Comment, AccessMetadata, ComponentMetadata, AccessControl, GroupPermissions, Permission, CURRENT_VERSION};
 use walkdir::WalkDir;
 
 pub fn generate_fake_data(root: &Path) {
