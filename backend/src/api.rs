@@ -411,6 +411,16 @@ pub struct BugQuery {
 }
 
 /// Resolves the metadata for a component path by merging from root downwards.
+/// 
+/// Process:
+/// 1. Start with an empty component metadata object.
+/// 2. Split the hierarchical path (e.g., "a/b/c") into individual components.
+/// 3. Try to read the "root" metadata file.
+/// 4. Iteratively descend into each folder in the path:
+///    a. Join the component name to the current path.
+///    b. Try to read the "component_metadata" file in that folder.
+///    c. If found, merge it into the current resolved metadata (child overwrites parent).
+/// 5. Return the final merged metadata.
 pub fn resolve_component_metadata(root: &std::path::Path, path: &str) -> ComponentMetadata {
     let mut resolved = ComponentMetadata::empty();
     
@@ -455,14 +465,28 @@ fn sanitize_name(name: &str) -> String {
 }
 
 /// Creates a new component. 
-/// NOTE: Creating components at the root level via the API is strictly banned and not a valid call.
-/// All components must be created under an existing parent component.
+/// NOTE: Creating components at the root level via the API is strictly banned.
+/// 
+/// Process:
+/// 1. Resolve the parent's hierarchical path using the `parent_id` and the component cache.
+/// 2. Verify that the parent directory exists on disk.
+/// 3. Resolve the full merged metadata for the parent to check permissions.
+/// 4. Check if the requesting user has `ComponentAdmin` permissions on the parent.
+/// 5. Scan the parent directory to ensure no sub-component already has the same display name.
+/// 6. Sanitize the new component name for use as a folder name.
+/// 7. Generate a unique folder name by appending a numeric suffix if a collision occurs on disk.
+/// 8. Create the new directory.
+/// 9. Initialize the child's access control groups by cloning the parent's groups.
+/// 10. Ensure the creator is added to the "Component Admins" group.
+/// 11. Obtain a lock on the `component_cache` to generate a new unique component ID.
+/// 12. Register the new ID and path in the cache.
+/// 13. Construct the `ComponentMetadata` object with the new ID and default template.
+/// 14. Serialize and write the metadata to "component_metadata" in the new folder.
 pub async fn create_component(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<CreateComponentRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    // CRITICAL: Creating a component at the root level via the API is explicitly banned.
-    // Parent ID must be valid and exist in the cache.
+    // 1. Resolve parent path
     let (parent_path_str, parent_path) = {
         let cache = state.component_cache.lock().unwrap();
         let path_str = cache.get_path(payload.parent_id).ok_or(StatusCode::NOT_FOUND)?;
@@ -470,19 +494,21 @@ pub async fn create_component(
         (path_str, path)
     };
 
+    // 2. Verify parent exists
     if !parent_path.exists() {
         return Err(StatusCode::NOT_FOUND);
     }
 
-    // Check permissions on parent
+    // 3. Resolve parent metadata for permission check
     let parent_meta = resolve_component_metadata(&state.root, &parent_path_str);
+    
+    // 4. Check authorization
     let is_authorized = parent_meta.has_permission(&payload.u, &Permission::ComponentAdmin);
-
     if !is_authorized {
         return Err(StatusCode::FORBIDDEN);
     }
 
-    // Check if component with same name already exists in metadata of children
+    // 5. Check for name conflicts in children metadata
     if let Ok(dir) = fs::read_dir(&parent_path) {
         for entry in dir.filter_map(|e| e.ok()) {
             if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
@@ -498,22 +524,22 @@ pub async fn create_component(
         }
     }
 
+    // 6 & 7. Generate safe and unique folder name
     let safe_name = sanitize_name(&payload.name);
     let mut component_path = parent_path.join(&safe_name);
-    
-    // If safe_name conflicts with existing folder, append a suffix
     let mut suffix = 1;
     while component_path.exists() {
         component_path = parent_path.join(format!("{}_{}", safe_name, suffix));
         suffix += 1;
     }
 
+    // 8. Create directory
     fs::create_dir_all(&component_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    // 9. Setup access control (inheriting from parent)
     let mut groups = parent_meta.access_control.groups.clone();
     
-    // ... (rest of group setup)
-    // Ensure creator is in "Component Admins"
+    // 10. Ensure creator is Admin
     let admins = groups.entry("Component Admins".to_string()).or_insert_with(|| GroupPermissions {
         permissions: vec![
             Permission::ComponentAdmin, Permission::CreateIssues, Permission::AdminIssues,
@@ -526,7 +552,7 @@ pub async fn create_component(
         admins.members.push(payload.u.clone());
     }
 
-    // Ensure other defaults exist
+    // Ensure standard groups exist
     groups.entry("Issue Admins".to_string()).or_insert_with(|| GroupPermissions {
         permissions: vec![
             Permission::CreateIssues, Permission::AdminIssues,
@@ -535,7 +561,6 @@ pub async fn create_component(
         view_level: 500,
         members: vec![],
     });
-
     groups.entry("Issue Editors".to_string()).or_insert_with(|| GroupPermissions {
         permissions: vec![
             Permission::CreateIssues, Permission::EditIssues, 
@@ -544,7 +569,6 @@ pub async fn create_component(
         view_level: 100,
         members: vec![],
     });
-
     groups.entry("Issue Contributors".to_string()).or_insert_with(|| GroupPermissions {
         permissions: vec![
             Permission::CreateIssues, Permission::CommentOnIssues, Permission::ViewIssues
@@ -557,6 +581,7 @@ pub async fn create_component(
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    // 11 & 12. Atomic cache update and ID generation
     let mut templates = HashMap::new();
     templates.insert("".to_string(), BugTemplate::default());
 
@@ -569,6 +594,7 @@ pub async fn create_component(
         (id, rel_path_str)
     };
 
+    // 13. Build metadata
     let meta = ComponentMetadata {
         version: CURRENT_VERSION,
         id: new_id,
@@ -588,6 +614,7 @@ pub async fn create_component(
         created_at: now.as_nanos() as u64,
     };
 
+    // 14. Persist to disk
     let bytes = rkyv::to_bytes::<_, 2048>(&meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     fs::write(component_path.join("component_metadata"), bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -602,14 +629,26 @@ pub struct TemplateRequest {
 }
 
 /// Adds a new template to a component.
+/// 
+/// Process:
+/// 1. Acquire a mutex for the component to prevent race conditions during template modifications.
+/// 2. Resolve the component's path on disk using its ID.
+/// 3. Read the existing component metadata from disk.
+/// 4. Check if the user has `ComponentAdmin` permissions.
+/// 5. Validate that the new template name is not empty (reserved for the default template).
+/// 6. Check for duplicate template names.
+/// 7. Insert the new template into the component's template map.
+/// 8. Serialize and save the updated metadata back to disk.
 pub async fn add_template(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
     Json(payload): Json<TemplateRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    // 1. Lock component
     let lock = state.get_component_lock(id);
     let _guard = lock.lock().await;
 
+    // 2. Resolve path
     let component_path = find_component_path(&state, id).ok_or(StatusCode::NOT_FOUND)?;
     let meta_file = component_path.join("component_metadata");
 
@@ -617,23 +656,29 @@ pub async fn add_template(
         return Err(StatusCode::NOT_FOUND);
     }
 
+    // 3. Read metadata
     let data = fs::read(&meta_file).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    // 4. Permission check
     if !meta.has_permission(&payload.u, &Permission::ComponentAdmin) {
         return Err(StatusCode::FORBIDDEN);
     }
 
+    // 5. Validation
     if payload.template.name.is_empty() {
-        return Err(StatusCode::BAD_REQUEST); // Cannot add another "default" template this way
+        return Err(StatusCode::BAD_REQUEST); 
     }
 
+    // 6. Duplicate check
     if meta.templates.contains_key(&payload.template.name) {
         return Err(StatusCode::CONFLICT);
     }
 
+    // 7. Update metadata
     meta.templates.insert(payload.template.name.clone(), payload.template);
 
+    // 8. Persist
     let bytes = rkyv::to_bytes::<_, 2048>(&meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     fs::write(&meta_file, bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -649,6 +694,16 @@ pub struct ModifyTemplateRequest {
 }
 
 /// Modifies an existing template.
+/// 
+/// Process:
+/// 1. Acquire component lock.
+/// 2. Resolve component path and read its metadata.
+/// 3. Verify user has `ComponentAdmin` permissions.
+/// 4. Ensure the template being modified exists.
+/// 5. Enforce restriction: The default template (name "") cannot be renamed.
+/// 6. If renaming, check that the new name does not conflict with an existing template.
+/// 7. Remove the old template entry and insert the updated template.
+/// 8. Persist changes to disk.
 pub async fn modify_template(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
@@ -671,12 +726,11 @@ pub async fn modify_template(
         return Err(StatusCode::NOT_FOUND);
     }
 
-    // "can't rename the 'default template'"
+    // Rule: can't rename the 'default template'
     if payload.old_name.is_empty() && payload.template.name != "" {
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // If renaming, check for conflict
     if payload.old_name != payload.template.name && meta.templates.contains_key(&payload.template.name) {
         return Err(StatusCode::CONFLICT);
     }
@@ -689,6 +743,7 @@ pub async fn modify_template(
 
     Ok(StatusCode::OK)
 }
+
 /// Request payload for deleting a template.
 #[derive(SerdeDeserialize)]
 pub struct DeleteTemplateRequest {
@@ -696,8 +751,15 @@ pub struct DeleteTemplateRequest {
     pub name: String,
 }
 
-
 /// Deletes a template from a component.
+/// 
+/// Process:
+/// 1. Acquire component lock.
+/// 2. Resolve component path and read its metadata.
+/// 3. Verify user has `ComponentAdmin` permissions.
+/// 4. Enforce restriction: The default template (name "") cannot be deleted.
+/// 5. Remove the template from the map and verify it existed.
+/// 6. Persist updated metadata back to disk.
 pub async fn delete_template(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
@@ -717,7 +779,7 @@ pub async fn delete_template(
     }
 
     if payload.name.is_empty() {
-        return Err(StatusCode::BAD_REQUEST); // "can't delete the 'default template'"
+        return Err(StatusCode::BAD_REQUEST); // Protected default template
     }
 
     if meta.templates.remove(&payload.name).is_none() {
@@ -732,6 +794,11 @@ pub async fn delete_template(
 
 
 /// Retrieves the resolved metadata for a specific component.
+/// 
+/// Process:
+/// 1. Resolve the hierarchical path string from the component cache using the ID.
+/// 2. Call `resolve_component_metadata` to merge metadata from root down to this path.
+/// 3. Return the fully resolved metadata as JSON.
 pub async fn get_component_metadata(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
@@ -743,11 +810,18 @@ pub async fn get_component_metadata(
     };
     let resolved = resolve_component_metadata(&state.root, &path);
     
-    // Check view access, components are always visible to everyone.
     Ok(Json(resolved))
 }
 
 /// Retrieves a list of all components (folders) in the system.
+/// 
+/// Process:
+/// 1. Recursively walk the root directory.
+/// 2. For every directory encountered:
+///    a. Filter out the root itself and hidden folders (starting with "__").
+///    b. Filter out folders that are named purely with numbers (these are Bug ID folders).
+///    c. Convert the relative filesystem path to a standard forward-slash path string.
+/// 3. Collect unique paths into a sorted list and return as JSON.
 pub async fn get_component_list(
     State(state): State<Arc<AppState>>,
     Query(_query): Query<BugQuery>,
@@ -788,7 +862,15 @@ pub async fn get_component_list(
 }
 
 /// Retrieves a list of bugs matching the search criteria.
-/// Requires bugs to have at least one component (folder).
+/// 
+/// Process:
+/// 1. Recursively scan the root for files named "metadata".
+/// 2. For each metadata file:
+///    a. Deserialize the `BugMetadata`.
+///    b. Check if the requesting user has at least `View` access.
+///    c. If a search query `q` is provided, match it against the title, assignee, and reporter (case-insensitive).
+///    d. If it matches, add a `BugSummary` to the result list.
+/// 3. Return the collected summaries as JSON.
 pub async fn get_bug_list(
     State(state): State<Arc<AppState>>,
     Query(query): Query<SearchQuery>,
@@ -812,11 +894,6 @@ pub async fn get_bug_list(
             Err(_) => continue,
         };
         
-        // Requirement: bugs must have at least one component.
-        if metadata.folders.is_empty() {
-            continue;
-        }
-
         // Check view access
         if metadata.access_level(&state.root, &u) < UserAccessLevel::View {
             continue;
@@ -839,6 +916,15 @@ pub async fn get_bug_list(
 }
 
 /// Retrieves the full details of a specific bug by its ID.
+/// 
+/// Process:
+/// 1. Locate the bug's directory using the bug ID cache.
+/// 2. Read and deserialize the "metadata" file.
+/// 3. Verify the requesting user has `View` access.
+/// 4. Read the bug's directory to find all files starting with "comment_".
+/// 5. Deserialize and collect all comments into a list.
+/// 6. Sort comments by their sequential ID.
+/// 7. Construct and return the full `Bug` object as JSON.
 pub async fn get_bug(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
@@ -888,7 +974,7 @@ pub struct BugStateResponse {
     pub state_id: u64,
 }
 
-/// Retrieves the current state ID of a specific bug.
+/// Retrieves the current state ID of a specific bug. Used for cache invalidation.
 pub async fn get_bug_state(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
@@ -927,6 +1013,16 @@ pub struct SubmitCommentResponse {
 }
 
 /// Submits a new comment to an existing bug.
+/// 
+/// Process:
+/// 1. Acquire the bug-specific mutex to synchronize updates.
+/// 2. Locate the bug's directory and read its metadata.
+/// 3. Verify the user has `Comment` access.
+/// 4. Increment the bug's `state_id` and save the updated metadata.
+/// 5. Scan the bug directory to determine the next sequential comment ID.
+/// 6. Construct the `Comment` object with the current timestamp.
+/// 7. Serialize and save the comment to a new file (e.g., "comment_0000005").
+/// 8. Return the new comment ID and the new bug state ID.
 pub async fn submit_comment(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
@@ -1008,7 +1104,16 @@ pub struct ChangeMetadataResponse {
 }
 
 /// Updates a metadata field for a specific bug.
-/// Handles both system fields and user-defined metadata.
+/// 
+/// Process:
+/// 1. Acquire bug lock.
+/// 2. Locate bug and read metadata.
+/// 3. Verify `Full` (Edit) access.
+/// 4. If the field is a system field (status, priority, etc.), update it directly.
+/// 5. Otherwise, search for the key in `user_metadata`. If found, update it; if not, add a new entry.
+/// 6. Increment `state_id`.
+/// 7. Persist updated metadata to disk.
+/// 8. Return the new `state_id`.
 pub async fn change_metadata(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
