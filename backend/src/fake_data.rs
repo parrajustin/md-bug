@@ -38,6 +38,20 @@ pub fn generate_fake_data(root: &Path) {
     let statuses = ["New", "Assigned", "Fixed", "Verified"];
     let types = ["Bug", "Feature", "Task"];
 
+    let mut next_comp_id = 1;
+    // Find current max component ID
+    for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
+        if entry.file_name() == "component_metadata" {
+            if let Ok(data) = fs::read(entry.path()) {
+                if let Ok(meta) = crate::api::read_versioned::<ComponentMetadata>(&data) {
+                    if meta.id >= next_comp_id {
+                        next_comp_id = meta.id + 1;
+                    }
+                }
+            }
+        }
+    }
+
     for i in 1..=num_bugs {
         let bug_id = max_id + i;
 
@@ -65,6 +79,7 @@ pub fn generate_fake_data(root: &Path) {
 
                 let comp_meta = ComponentMetadata {
                     version: CURRENT_VERSION,
+                    id: next_comp_id,
                     name: f.clone(),
                     description: format!("Description for component {}", f),
                     creator: SafeEmail().fake(),
@@ -90,6 +105,7 @@ pub fn generate_fake_data(root: &Path) {
                 };
                 if let Ok(bytes) = rkyv::to_bytes::<_, 1024>(&comp_meta) {
                     let _ = fs::write(meta_file, bytes);
+                    next_comp_id += 1;
                 }
             }
         }

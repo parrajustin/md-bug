@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use walkdir::WalkDir;
 
 use crate::bug_id_cache::BugIdCache;
+use crate::component_id_cache::ComponentIdCache;
 
 pub const CURRENT_VERSION: u32 = 1;
 
@@ -92,7 +93,7 @@ pub struct AccessControl {
 pub struct BugTemplate {
     pub name: String,
     pub description: String,
-    pub title: Option<String>,
+    pub title: String,
     #[serde(rename = "type")]
     pub bug_type: Option<String>,
     pub priority: Option<String>,
@@ -110,6 +111,7 @@ pub struct BugTemplate {
 #[archive(check_bytes)]
 pub struct ComponentMetadata {
     pub version: u32,
+    pub id: u32,
     pub name: String,
     pub description: String,
     pub creator: String,
@@ -150,6 +152,7 @@ impl ComponentMetadata {
         templates.insert("".to_string(), BugTemplate::default());
         Self {
             version: CURRENT_VERSION,
+            id: 0,
             name: "".to_string(),
             description: "".to_string(),
             creator: "".to_string(),
@@ -363,8 +366,12 @@ pub struct AppState {
     pub root: PathBuf,
     /// Cache mapping bug IDs to folder locations.
     pub cache: Mutex<BugIdCache>,
+    /// Cache mapping component IDs to folder locations.
+    pub component_cache: Mutex<ComponentIdCache>,
     /// Per-bug locks to synchronize modifications.
     pub bug_locks: Mutex<HashMap<u32, Arc<tokio::sync::Mutex<()>>>>,
+    /// Per-component locks to synchronize modifications.
+    pub component_locks: Mutex<HashMap<u32, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl AppState {
@@ -373,6 +380,18 @@ impl AppState {
         let mut locks = self.bug_locks.lock().unwrap_or_else(|e| e.into_inner());
         locks.entry(id).or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))).clone()
     }
+
+    /// Gets or creates a mutex for a specific component ID.
+    pub fn get_component_lock(&self, id: u32) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.component_locks.lock().unwrap_or_else(|e| e.into_inner());
+        locks.entry(id).or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))).clone()
+    }
+}
+
+/// Helper function to locate the directory path of a component given its ID using the cache.
+pub fn find_component_path(state: &AppState, id: u32) -> Option<PathBuf> {
+    let cache = state.component_cache.lock().ok()?;
+    cache.get_path(id).map(|path| state.root.join(path.replace('/', std::path::MAIN_SEPARATOR_STR)))
 }
 
 /// Query parameters for searching bugs.
@@ -387,15 +406,6 @@ pub struct SearchQuery {
 /// Query parameters for bug-specific requests.
 #[derive(SerdeDeserialize)]
 pub struct BugQuery {
-    /// The username of the user making the request.
-    pub u: String,
-}
-
-/// Query parameters for component metadata requests.
-#[derive(SerdeDeserialize)]
-pub struct ComponentQuery {
-    /// The hierarchical path of the component (e.g., "google/sxs").
-    pub path: String,
     /// The username of the user making the request.
     pub u: String,
 }
@@ -434,7 +444,7 @@ pub struct CreateComponentRequest {
     pub u: String,
     pub name: String,
     pub description: String,
-    pub parent: String, // Path like "google/perception" or "" for root
+    pub parent_id: u32,
 }
 
 /// Helper to sanitize names for filesystem use.
@@ -452,19 +462,20 @@ pub async fn create_component(
     Json(payload): Json<CreateComponentRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // CRITICAL: Creating a component at the root level via the API is explicitly banned.
-    // This is a hard restriction to ensure hierarchical integrity.
-    if payload.parent.is_empty() {
-        return Err(StatusCode::FORBIDDEN);
-    }
-
-    let parent_path = state.root.join(payload.parent.replace('/', std::path::MAIN_SEPARATOR_STR));
+    // Parent ID must be valid and exist in the cache.
+    let (parent_path_str, parent_path) = {
+        let cache = state.component_cache.lock().unwrap();
+        let path_str = cache.get_path(payload.parent_id).ok_or(StatusCode::NOT_FOUND)?;
+        let path = state.root.join(path_str.replace('/', std::path::MAIN_SEPARATOR_STR));
+        (path_str, path)
+    };
 
     if !parent_path.exists() {
         return Err(StatusCode::NOT_FOUND);
     }
 
     // Check permissions on parent
-    let parent_meta = resolve_component_metadata(&state.root, &payload.parent);
+    let parent_meta = resolve_component_metadata(&state.root, &parent_path_str);
     let is_authorized = parent_meta.has_permission(&payload.u, &Permission::ComponentAdmin);
 
     if !is_authorized {
@@ -501,6 +512,7 @@ pub async fn create_component(
 
     let mut groups = parent_meta.access_control.groups.clone();
     
+    // ... (rest of group setup)
     // Ensure creator is in "Component Admins"
     let admins = groups.entry("Component Admins".to_string()).or_insert_with(|| GroupPermissions {
         permissions: vec![
@@ -548,8 +560,18 @@ pub async fn create_component(
     let mut templates = HashMap::new();
     templates.insert("".to_string(), BugTemplate::default());
 
+    let (new_id, _relative_path_str) = {
+        let mut cache = state.component_cache.lock().unwrap();
+        let id = cache.get_next_id();
+        let rel_path = component_path.strip_prefix(&state.root).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let rel_path_str = rel_path.to_string_lossy().replace('\\', "/");
+        cache.insert(id, rel_path_str.clone());
+        (id, rel_path_str)
+    };
+
     let meta = ComponentMetadata {
         version: CURRENT_VERSION,
+        id: new_id,
         name: payload.name,
         description: payload.description,
         creator: payload.u,
@@ -572,20 +594,23 @@ pub async fn create_component(
     Ok(StatusCode::CREATED)
 }
 
-/// Request payload for adding or modifying a template.
+/// Request payload for adding a template.
 #[derive(SerdeDeserialize)]
 pub struct TemplateRequest {
     pub u: String,
-    pub path: String,
     pub template: BugTemplate,
 }
 
 /// Adds a new template to a component.
 pub async fn add_template(
     State(state): State<Arc<AppState>>,
+    Path(id): Path<u32>,
     Json(payload): Json<TemplateRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let component_path = state.root.join(payload.path.replace('/', std::path::MAIN_SEPARATOR_STR));
+    let lock = state.get_component_lock(id);
+    let _guard = lock.lock().await;
+
+    let component_path = find_component_path(&state, id).ok_or(StatusCode::NOT_FOUND)?;
     let meta_file = component_path.join("component_metadata");
 
     if !meta_file.exists() {
@@ -619,7 +644,6 @@ pub async fn add_template(
 #[derive(SerdeDeserialize)]
 pub struct ModifyTemplateRequest {
     pub u: String,
-    pub path: String,
     pub old_name: String,
     pub template: BugTemplate,
 }
@@ -627,14 +651,14 @@ pub struct ModifyTemplateRequest {
 /// Modifies an existing template.
 pub async fn modify_template(
     State(state): State<Arc<AppState>>,
+    Path(id): Path<u32>,
     Json(payload): Json<ModifyTemplateRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let component_path = state.root.join(payload.path.replace('/', std::path::MAIN_SEPARATOR_STR));
-    let meta_file = component_path.join("component_metadata");
+    let lock = state.get_component_lock(id);
+    let _guard = lock.lock().await;
 
-    if !meta_file.exists() {
-        return Err(StatusCode::NOT_FOUND);
-    }
+    let component_path = find_component_path(&state, id).ok_or(StatusCode::NOT_FOUND)?;
+    let meta_file = component_path.join("component_metadata");
 
     let data = fs::read(&meta_file).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -665,26 +689,25 @@ pub async fn modify_template(
 
     Ok(StatusCode::OK)
 }
-
 /// Request payload for deleting a template.
 #[derive(SerdeDeserialize)]
 pub struct DeleteTemplateRequest {
     pub u: String,
-    pub path: String,
     pub name: String,
 }
+
 
 /// Deletes a template from a component.
 pub async fn delete_template(
     State(state): State<Arc<AppState>>,
+    Path(id): Path<u32>,
     Json(payload): Json<DeleteTemplateRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let component_path = state.root.join(payload.path.replace('/', std::path::MAIN_SEPARATOR_STR));
-    let meta_file = component_path.join("component_metadata");
+    let lock = state.get_component_lock(id);
+    let _guard = lock.lock().await;
 
-    if !meta_file.exists() {
-        return Err(StatusCode::NOT_FOUND);
-    }
+    let component_path = find_component_path(&state, id).ok_or(StatusCode::NOT_FOUND)?;
+    let meta_file = component_path.join("component_metadata");
 
     let data = fs::read(&meta_file).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -711,9 +734,14 @@ pub async fn delete_template(
 /// Retrieves the resolved metadata for a specific component.
 pub async fn get_component_metadata(
     State(state): State<Arc<AppState>>,
-    Query(query): Query<ComponentQuery>,
+    Path(id): Path<u32>,
+    Query(_query): Query<BugQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let resolved = resolve_component_metadata(&state.root, &query.path);
+    let path = {
+        let cache = state.component_cache.lock().unwrap();
+        cache.get_path(id).ok_or(StatusCode::NOT_FOUND)?
+    };
+    let resolved = resolve_component_metadata(&state.root, &path);
     
     // Check view access, components are always visible to everyone.
     Ok(Json(resolved))

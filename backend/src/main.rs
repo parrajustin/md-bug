@@ -1,6 +1,7 @@
 mod api;
 mod fake_data;
 mod bug_id_cache;
+mod component_id_cache;
 
 use axum::{
     routing::{get, post},
@@ -12,8 +13,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tower_http::services::{ServeDir, ServeFile};
+
 use crate::api::AppState;
 use crate::bug_id_cache::BugIdCache;
+use crate::component_id_cache::ComponentIdCache;
 
 #[derive(Parser)]
 struct Args {
@@ -51,7 +54,6 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Generate fake data if the flag is set.
-    println!("fake data value: {}", args.fake_data);
     if args.fake_data {
         fake_data::generate_fake_data(&args.root);
     }
@@ -59,10 +61,16 @@ async fn main() -> anyhow::Result<()> {
     // Load and update the bug ID cache.
     let cache = BugIdCache::load_and_update(&args.root);
 
+    // Load and update the component ID cache.
+    let mut component_cache = ComponentIdCache::default();
+    component_cache.update_from_disk(&args.root);
+
     let shared_state = Arc::new(AppState {
         root: args.root.clone(),
         cache: Mutex::new(cache),
+        component_cache: Mutex::new(component_cache),
         bug_locks: Mutex::new(HashMap::new()),
+        component_locks: Mutex::new(HashMap::new()),
     });
 
     let index_file = args.frontend_dir.join("index.html");
@@ -73,12 +81,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/bug/:id/state", get(api::get_bug_state))
         .route("/api/bug/:id/comment", post(api::submit_comment))
         .route("/api/bug/:id/metadata", post(api::change_metadata))
-        .route("/api/component_metadata", get(api::get_component_metadata))
+        .route("/api/component/:id/get_metadata", get(api::get_component_metadata))
         .route("/api/component_list", get(api::get_component_list))
         .route("/api/create_component", post(api::create_component))
-        .route("/api/add_template", post(api::add_template))
-        .route("/api/modify_template", post(api::modify_template))
-        .route("/api/delete_template", post(api::delete_template))
+        .route("/api/component/:id/add_template", post(api::add_template))
+        .route("/api/component/:id/modify_template", post(api::modify_template))
+        .route("/api/component/:id/delete_template", post(api::delete_template))
         .fallback_service(
             ServeDir::new(&args.frontend_dir)
                 .not_found_service(ServeFile::new(index_file))

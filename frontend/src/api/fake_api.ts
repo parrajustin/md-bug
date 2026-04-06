@@ -134,6 +134,7 @@ export class FakeApi implements API {
         "": {
           name: "",
           description: "",
+          title: "",
           collaborators: [],
           cc: []
         }

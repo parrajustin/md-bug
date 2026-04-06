@@ -26,7 +26,7 @@ export interface AccessMetadata {
 export interface BugTemplate {
   name: string;
   description: string;
-  title?: string;
+  title: string;
   type?: string;
   priority?: string;
   severity?: string;
