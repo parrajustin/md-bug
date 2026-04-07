@@ -14,7 +14,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tower_http::services::{ServeDir, ServeFile};
 
-use crate::api::AppState;
 use crate::bug_id_cache::BugIdCache;
 use crate::component_id_cache::ComponentIdCache;
 
@@ -65,9 +64,9 @@ async fn main() -> anyhow::Result<()> {
     let mut component_cache = ComponentIdCache::default();
     component_cache.update_from_disk(&args.root);
 
-    let shared_state = Arc::new(AppState {
+    let shared_state = Arc::new(api::AppState {
         root: args.root.clone(),
-        cache: Mutex::new(cache),
+        bug_cache: cache,
         component_cache: Mutex::new(component_cache),
         bug_locks: Mutex::new(HashMap::new()),
         component_locks: Mutex::new(HashMap::new()),
@@ -84,6 +83,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/component/:id/get_metadata", get(api::get_component_metadata))
         .route("/api/component_list", get(api::get_component_list))
         .route("/api/create_component", post(api::create_component))
+        .route("/api/create_bug", post(api::create_bug))
         .route("/api/component/:id/add_template", post(api::add_template))
         .route("/api/component/:id/modify_template", post(api::modify_template))
         .route("/api/component/:id/delete_template", post(api::delete_template))

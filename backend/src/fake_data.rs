@@ -64,6 +64,7 @@ pub fn generate_fake_data(root: &Path) {
         }
 
         let mut current_path = root.to_path_buf();
+        let mut last_comp_id = 0;
         for f in &folders {
             current_path.push(f);
             if let Err(e) = fs::create_dir_all(&current_path) {
@@ -71,9 +72,8 @@ pub fn generate_fake_data(root: &Path) {
                 continue;
             }
 
-            // 50/50 chance to create component metadata if it doesn't exist
             let meta_file = current_path.join("component_metadata");
-            if !meta_file.exists() && rng.gen_bool(0.5) {
+            if !meta_file.exists() {
                 let mut templates = HashMap::new();
                 templates.insert("".to_string(), crate::api::BugTemplate::default());
 
@@ -92,7 +92,7 @@ pub fn generate_fake_data(root: &Path) {
                     access_control: AccessControl { groups: {
                         let mut g = HashMap::new();
                         g.insert("Component Admins".to_string(), GroupPermissions {
-                            permissions: vec![Permission::ComponentAdmin, Permission::ViewIssues],
+                            permissions: vec![Permission::ComponentAdmin, Permission::ViewIssues, Permission::CommentOnIssues, Permission::EditIssues, Permission::CreateIssues, Permission::AdminIssues],
                             view_level: 999,
                             members: vec![SafeEmail().fake()],
                         });
@@ -105,7 +105,15 @@ pub fn generate_fake_data(root: &Path) {
                 };
                 if let Ok(bytes) = rkyv::to_bytes::<_, 1024>(&comp_meta) {
                     let _ = fs::write(meta_file, bytes);
+                    last_comp_id = next_comp_id;
                     next_comp_id += 1;
+                }
+            } else {
+                // Read existing ID
+                if let Ok(data) = fs::read(&meta_file) {
+                    if let Ok(meta) = crate::api::read_versioned::<ComponentMetadata>(&data) {
+                        last_comp_id = meta.id;
+                    }
                 }
             }
         }
@@ -145,7 +153,7 @@ pub fn generate_fake_data(root: &Path) {
                 view_access,
             },
             title: Sentence(3..8).fake(),
-            folders,
+            component_id: last_comp_id,
             description: Paragraph(1..5).fake(),
             user_metadata: vec![],
             created_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0),

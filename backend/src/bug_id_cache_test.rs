@@ -29,17 +29,18 @@ fn test_cache_update_from_disk() -> anyhow::Result<()> {
     let bug_invalid_path = root.join("123").join("456");
     fs::create_dir_all(&bug_invalid_path)?;
 
-    let mut cache = BugIdCache::default();
+    let cache = BugIdCache::new();
     cache.update_from_disk(root);
 
-    assert_eq!(cache.id_to_components.get(&100), Some(&vec!["google".to_string(), "perception".to_string()]));
-    assert_eq!(cache.id_to_components.get(&200), Some(&vec!["default".to_string()]));
-    assert_eq!(cache.id_to_components.get(&300), Some(&vec![]));
-    assert_eq!(cache.id_to_components.get(&400), None); // Skipped because of __
+    let id_to_comp = cache.id_to_components.lock().unwrap();
+    assert_eq!(id_to_comp.get(&100), Some(&vec!["google".to_string(), "perception".to_string()]));
+    assert_eq!(id_to_comp.get(&200), Some(&vec!["default".to_string()]));
+    assert_eq!(id_to_comp.get(&300), Some(&vec![]));
+    assert_eq!(id_to_comp.get(&400), None); // Skipped because of __
     
     // 123 is a number, so it should be treated as a bug ID, and 456 should be skipped as a sub-component
-    assert_eq!(cache.id_to_components.get(&123), Some(&vec![]));
-    assert_eq!(cache.id_to_components.get(&456), None);
+    assert_eq!(id_to_comp.get(&123), Some(&vec![]));
+    assert_eq!(id_to_comp.get(&456), None);
 
     Ok(())
 }
@@ -49,8 +50,8 @@ fn test_cache_save_and_load() -> anyhow::Result<()> {
     let dir = tempdir()?;
     let root = dir.path();
 
-    let mut cache = BugIdCache::default();
-    cache.id_to_components.insert(123, vec!["comp1".to_string()]);
+    let cache = BugIdCache::new();
+    cache.insert_bug(123, vec!["comp1".to_string()]);
     cache.save(root)?;
 
     let cache_path = root.join("__bug_id_cache__");
@@ -58,7 +59,8 @@ fn test_cache_save_and_load() -> anyhow::Result<()> {
 
     // Load and update (update should be a no-op if no new folders)
     let loaded_cache = BugIdCache::load_and_update(root);
-    assert_eq!(loaded_cache.id_to_components.get(&123), Some(&vec!["comp1".to_string()]));
+    let id_to_comp = loaded_cache.id_to_components.lock().unwrap();
+    assert_eq!(id_to_comp.get(&123), Some(&vec!["comp1".to_string()]));
 
     Ok(())
 }
@@ -68,8 +70,8 @@ fn test_get_path() -> anyhow::Result<()> {
     let dir = tempdir()?;
     let root = dir.path();
 
-    let mut cache = BugIdCache::default();
-    cache.id_to_components.insert(100, vec!["google".to_string(), "perception".to_string()]);
+    let cache = BugIdCache::new();
+    cache.insert_bug(100, vec!["google".to_string(), "perception".to_string()]);
 
     let path = cache.get_path(root, 100);
     assert_eq!(path, Some(root.join("google").join("perception").join("100")));
@@ -77,5 +79,17 @@ fn test_get_path() -> anyhow::Result<()> {
     let no_path = cache.get_path(root, 999);
     assert_eq!(no_path, None);
 
+    Ok(())
+}
+
+#[test]
+fn test_granular_comment_ids() -> anyhow::Result<()> {
+    let cache = BugIdCache::new();
+    
+    assert_eq!(cache.get_next_comment_id(1), 1);
+    assert_eq!(cache.get_next_comment_id(1), 2);
+    assert_eq!(cache.get_next_comment_id(2), 1);
+    assert_eq!(cache.get_next_comment_id(1), 3);
+    
     Ok(())
 }

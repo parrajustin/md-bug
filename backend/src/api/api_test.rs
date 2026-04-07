@@ -9,7 +9,7 @@ use std::path::Path as StdPath;
 use axum::http::StatusCode;
 use crate::bug_id_cache::BugIdCache;
 
-fn create_test_bug(root: &StdPath, id: u32, folders: Vec<String>) -> anyhow::Result<std::path::PathBuf> {
+fn create_test_bug(root: &StdPath, id: u32, component_id: u32, folders: Vec<String>) -> anyhow::Result<std::path::PathBuf> {
     let mut bug_path = root.to_path_buf();
     for folder in &folders {
         bug_path.push(folder);
@@ -36,7 +36,7 @@ fn create_test_bug(root: &StdPath, id: u32, folders: Vec<String>) -> anyhow::Res
             view_access: vec![],
         },
         title: format!("Test Bug {}", id),
-        folders,
+        component_id,
         description: "Test bug description".to_string(),
         user_metadata: vec![],
         created_at: 123456789,
@@ -65,8 +65,12 @@ fn create_test_component(root: &StdPath, path: &str, name: &str, admins: Vec<Str
         members: contributors,
     });
 
+    let mut templates = HashMap::new();
+    templates.insert("".to_string(), BugTemplate::default());
+
     let meta = ComponentMetadata {
         version: CURRENT_VERSION,
+        id: 0,
         name: name.to_string(),
         description: "Test component".to_string(),
         creator: "admin".to_string(),
@@ -77,6 +81,8 @@ fn create_test_component(root: &StdPath, path: &str, name: &str, admins: Vec<Str
         collaborators: vec![],
         cc: vec![],
         access_control: AccessControl { groups },
+        templates,
+        default_template: "".to_string(),
         user_metadata: vec![],
         created_at: 123456789,
     };
@@ -97,13 +103,19 @@ async fn test_access_control_inheritance() -> anyhow::Result<()> {
     create_test_component(root, "parent/child", "Child", vec!["child_admin".to_string()], vec!["contributor".to_string()])?;
     
     // Create bug in child component
-    create_test_bug(root, 1, vec!["parent".to_string(), "child".to_string()])?;
+    create_test_bug(root, 1, 1, vec!["parent".to_string(), "child".to_string()])?;
     
+    let mut component_cache = ComponentIdCache::default();
+    component_cache.insert(0, "".to_string());
+    component_cache.insert(1, "parent/child".to_string());
+
     let cache = BugIdCache::load_and_update(root);
     let state = Arc::new(AppState { 
         root: root.to_path_buf(),
-        cache: Mutex::new(cache),
+        bug_cache: cache,
+        component_cache: Mutex::new(component_cache),
         bug_locks: Mutex::new(HashMap::new()),
+        component_locks: Mutex::new(HashMap::new()),
     });
 
     // Case 1: parent_admin should have Full access via inheritance
@@ -139,40 +151,50 @@ async fn test_create_component_permissions() -> anyhow::Result<()> {
     let dir = tempdir()?;
     let root = dir.path();
 
+    let mut component_cache = ComponentIdCache::default();
+    component_cache.insert(0, "".to_string());
+
     let state = Arc::new(AppState { 
         root: root.to_path_buf(),
-        cache: Mutex::new(BugIdCache::default()),
+        bug_cache: BugIdCache::new(),
+        component_cache: Mutex::new(component_cache),
         bug_locks: Mutex::new(HashMap::new()),
+        component_locks: Mutex::new(HashMap::new()),
     });
 
-    // Case 1: Root bootstrap - first component creation should succeed
+    // Case 1: Root creation attempt via API - SHOULD BE FORBIDDEN
     let req = CreateComponentRequest {
         u: "first_user".to_string(),
         name: "Root Comp".to_string(),
         description: "First one".to_string(),
-        parent: "".to_string(),
+        parent_id: 0,
     };
     let res = create_component(State(state.clone()), Json(req)).await.into_response();
-    assert_eq!(res.status(), StatusCode::CREATED);
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 
-    // Now root metadata exists. "first_user" is admin.
+    // Now create a component manually to test sub-component creation
+    create_test_component(root, "manual_root", "Manual Root", vec!["admin_user".to_string()], vec![])?;
+    {
+        let mut cache = state.component_cache.lock().unwrap();
+        cache.insert(1, "manual_root".to_string());
+    }
     
     // Case 2: unauthorized user tries to create sub-component
     let req = CreateComponentRequest {
         u: "intruder".to_string(),
         name: "Hack".to_string(),
         description: "Evil".to_string(),
-        parent: "root_comp".to_string(), // sanitized name of "Root Comp"
+        parent_id: 1, 
     };
     let res = create_component(State(state.clone()), Json(req)).await.into_response();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 
     // Case 3: authorized admin creates sub-component
     let req = CreateComponentRequest {
-        u: "first_user".to_string(),
+        u: "admin_user".to_string(),
         name: "Sub Comp".to_string(),
         description: "Child".to_string(),
-        parent: "root_comp".to_string(),
+        parent_id: 1,
     };
     let res = create_component(State(state.clone()), Json(req)).await.into_response();
     assert_eq!(res.status(), StatusCode::CREATED);
@@ -185,45 +207,56 @@ async fn test_create_component_collisions() -> anyhow::Result<()> {
     let dir = tempdir()?;
     let root = dir.path();
 
+    let mut component_cache = ComponentIdCache::default();
+    component_cache.insert(0, "".to_string());
+
     let state = Arc::new(AppState { 
         root: root.to_path_buf(),
-        cache: Mutex::new(BugIdCache::default()),
+        bug_cache: BugIdCache::new(),
+        component_cache: Mutex::new(component_cache),
         bug_locks: Mutex::new(HashMap::new()),
+        component_locks: Mutex::new(HashMap::new()),
     });
 
-    // Create initial component
+    // Create initial manual root
+    create_test_component(root, "manual_root", "Manual Root", vec!["admin".to_string()], vec![])?;
+    {
+        let mut cache = state.component_cache.lock().unwrap();
+        cache.insert(1, "manual_root".to_string());
+    }
+
+    // Create initial component under manual root
     let req = CreateComponentRequest {
         u: "admin".to_string(),
         name: "My Comp".to_string(), // safe name: my_comp
         description: "Desc".to_string(),
-        parent: "".to_string(),
+        parent_id: 1,
     };
-    create_component(State(state.clone()), Json(req)).await.into_response();
+    let res = create_component(State(state.clone()), Json(req)).await.into_response();
+    assert_eq!(res.status(), StatusCode::CREATED);
 
     // Case 1: Conflict by Name (not folder name)
     let req = CreateComponentRequest {
         u: "admin".to_string(),
         name: "My Comp".to_string(), // Exact same name
         description: "Another".to_string(),
-        parent: "".to_string(),
+        parent_id: 1,
     };
     let res = create_component(State(state.clone()), Json(req)).await.into_response();
     assert_eq!(res.status(), StatusCode::CONFLICT);
 
     // Case 2: Conflict by Folder (sanitization)
-    // "My Comp" -> my_comp
-    // "my-comp" -> my_comp (collision in folder name)
     let req = CreateComponentRequest {
         u: "admin".to_string(),
         name: "my-comp".to_string(),
         description: "Different name, same folder".to_string(),
-        parent: "".to_string(),
+        parent_id: 1,
     };
     let res = create_component(State(state.clone()), Json(req)).await.into_response();
-    assert_eq!(res.status(), StatusCode::CREATED); // Should succeed with my_comp_1
+    assert_eq!(res.status(), StatusCode::CREATED); 
     
-    assert!(root.join("my_comp").exists());
-    assert!(root.join("my_comp_1").exists());
+    assert!(root.join("manual_root").join("my_comp").exists());
+    assert!(root.join("manual_root").join("my_comp_1").exists());
 
     Ok(())
 }
@@ -233,10 +266,15 @@ async fn test_create_component_group_inheritance() -> anyhow::Result<()> {
     let dir = tempdir()?;
     let root = dir.path();
 
+    let mut component_cache = ComponentIdCache::default();
+    component_cache.insert(0, "".to_string());
+
     let state = Arc::new(AppState { 
         root: root.to_path_buf(),
-        cache: Mutex::new(BugIdCache::default()),
+        bug_cache: BugIdCache::new(),
+        component_cache: Mutex::new(component_cache),
         bug_locks: Mutex::new(HashMap::new()),
+        component_locks: Mutex::new(HashMap::new()),
     });
 
     // 1. Create parent component with default groups and a special group
@@ -264,9 +302,15 @@ async fn test_create_component_group_inheritance() -> anyhow::Result<()> {
         u: "admin".to_string(),
         name: "Child".to_string(),
         description: "Child component".to_string(),
-        parent: "parent".to_string(),
+        parent_id: 1,
     };
     
+    // We need parent in cache
+    {
+        let mut cache = state.component_cache.lock().unwrap();
+        cache.insert(1, "parent".to_string());
+    }
+
     let res = create_component(State(state.clone()), Json(req)).await.into_response();
     assert_eq!(res.status(), StatusCode::CREATED);
 
@@ -294,14 +338,16 @@ async fn test_create_component_group_inheritance() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_create_and_get_bug() -> anyhow::Result<()> {
     let dir = tempdir()?;
-    create_test_bug(dir.path(), 1, vec!["google".to_string(), "sxs".to_string()])?;
+    create_test_bug(dir.path(), 1, 1, vec!["google".to_string(), "sxs".to_string()])?;
     
     // Load cache after creating bug
     let cache = BugIdCache::load_and_update(dir.path());
     let state = Arc::new(AppState { 
         root: dir.path().to_path_buf(),
-        cache: Mutex::new(cache),
+        bug_cache: cache,
+        component_cache: Mutex::new(ComponentIdCache::default()),
         bug_locks: Mutex::new(HashMap::new()),
+        component_locks: Mutex::new(HashMap::new()),
     });
 
     let response = get_bug(State(state.clone()), Path(1), Query(BugQuery { u: "test@example.com".to_string() })).await.into_response();
@@ -321,13 +367,15 @@ async fn test_create_and_get_bug() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_submit_comment() -> anyhow::Result<()> {
     let dir = tempdir()?;
-    create_test_bug(dir.path(), 42, vec!["test".to_string()])?;
+    create_test_bug(dir.path(), 42, 1, vec!["test".to_string()])?;
     
     let cache = BugIdCache::load_and_update(dir.path());
     let state = Arc::new(AppState { 
         root: dir.path().to_path_buf(),
-        cache: Mutex::new(cache),
+        bug_cache: cache,
+        component_cache: Mutex::new(ComponentIdCache::default()),
         bug_locks: Mutex::new(HashMap::new()),
+        component_locks: Mutex::new(HashMap::new()),
     });
 
     let req = CommentRequest {
@@ -366,13 +414,15 @@ async fn test_submit_comment() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_change_metadata() -> anyhow::Result<()> {
     let dir = tempdir()?;
-    create_test_bug(dir.path(), 100, vec!["meta".to_string()])?;
+    create_test_bug(dir.path(), 100, 1, vec!["meta".to_string()])?;
     
     let cache = BugIdCache::load_and_update(dir.path());
     let state = Arc::new(AppState { 
         root: dir.path().to_path_buf(),
-        cache: Mutex::new(cache),
+        bug_cache: cache,
+        component_cache: Mutex::new(ComponentIdCache::default()),
         bug_locks: Mutex::new(HashMap::new()),
+        component_locks: Mutex::new(HashMap::new()),
     });
 
     // Note: create_test_bug by default only gives Comment access to PUBLIC.
@@ -428,25 +478,93 @@ async fn test_change_metadata() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn test_get_bug_state_endpoint() -> anyhow::Result<()> {
+async fn test_create_bug_with_template_access() -> anyhow::Result<()> {
     let dir = tempdir()?;
-    create_test_bug(dir.path(), 200, vec!["state".to_string()])?;
+    let root = dir.path();
+
+    // 1. Create component with a Limited Comment template
+    let mut templates = HashMap::new();
+    templates.insert("limited".to_string(), BugTemplate {
+        name: "limited".to_string(),
+        default_access: TemplateAccess::LimitedComment,
+        ..BugTemplate::default()
+    });
     
-    let cache = BugIdCache::load_and_update(dir.path());
-    let state = Arc::new(AppState { 
-        root: dir.path().to_path_buf(),
-        cache: Mutex::new(cache),
-        bug_locks: Mutex::new(HashMap::new()),
+    // We need to set component ID for cache
+    let comp_id = 10;
+    let mut component_cache = ComponentIdCache::default();
+    component_cache.insert(comp_id, "test_comp".to_string());
+    
+    let comp_path = root.join("test_comp");
+    fs::create_dir_all(&comp_path)?;
+    
+    let mut groups = HashMap::new();
+    groups.insert("Issue Contributors".to_string(), GroupPermissions {
+        permissions: vec![Permission::CreateIssues, Permission::ViewIssues, Permission::CommentOnIssues],
+        view_level: 1,
+        members: vec!["PUBLIC".to_string()],
     });
 
-    let response = get_bug_state(State(state), Path(200), Query(BugQuery { u: "test".to_string() })).await.into_response();
-    assert_eq!(response.status(), StatusCode::OK);
+    let meta = ComponentMetadata {
+        version: CURRENT_VERSION,
+        id: comp_id,
+        name: "Test Comp".to_string(),
+        description: "Desc".to_string(),
+        creator: "admin".to_string(),
+        bug_type: None,
+        priority: None,
+        severity: None,
+        verifier: None,
+        collaborators: vec![],
+        cc: vec![],
+        access_control: AccessControl { groups },
+        templates,
+        default_template: "".to_string(),
+        user_metadata: vec![],
+        created_at: 123456789,
+    };
+    let bytes = rkyv::to_bytes::<_, 2048>(&meta).unwrap();
+    fs::write(comp_path.join("component_metadata"), bytes).unwrap();
 
-    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024).await?;
-    let json: serde_json::Value = serde_json::from_slice(&body)?;
+    let state = Arc::new(AppState { 
+        root: root.to_path_buf(),
+        bug_cache: BugIdCache::new(),
+        component_cache: Mutex::new(component_cache),
+        bug_locks: Mutex::new(HashMap::new()),
+        component_locks: Mutex::new(HashMap::new()),
+    });
+
+    // 2. Create bug using the template
+    let req = CreateBugRequest {
+        u: "user1".to_string(),
+        component_id: comp_id,
+        template_name: "limited".to_string(),
+        title: "Template Bug".to_string(),
+        description: "Testing access".to_string(),
+        bug_type: None,
+        priority: None,
+        severity: None,
+        assignee: None,
+        verifier: None,
+        collaborators: vec![],
+        cc: vec![],
+        created_at: None,
+    };
+
+    let res = create_bug(State(state.clone()), Json(req)).await.into_response();
+    assert_eq!(res.status(), StatusCode::OK);
     
-    // Verify get_bug_state returns JSON object with state_id in "n" format
-    assert_eq!(json["state_id"], "1n");
+    let body = axum::body::to_bytes(res.into_body(), 1024).await?;
+    let bug_id: u32 = serde_json::from_slice(&body)?;
+    assert_eq!(bug_id, 1);
+
+    // 3. Verify bug access metadata
+    let bug_dir = comp_path.join("1");
+    let data = fs::read(bug_dir.join("metadata"))?;
+    let bug_meta: BugMetadata = rkyv::from_bytes::<BugMetadata>(&data).unwrap();
+    
+    assert!(bug_meta.access.comment_access.contains(&"PUBLIC".to_string()));
+    assert!(!bug_meta.access.view_access.contains(&"PUBLIC".to_string()));
 
     Ok(())
 }

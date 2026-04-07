@@ -4,6 +4,13 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+
+// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+// ! STRICT MANDATE: ROOT COMPONENT CREATION VIA API IS FORBIDDEN.                !
+// ! DO NOT ADD BOOTSTRAP LOGIC. DO NOT ALLOW PARENT_ID 0.                        !
+// ! ROOT COMPONENTS ARE CREATED MANUALLY ON DISK ONLY.                           !
+// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 use std::collections::HashMap;
 use std::fs;
@@ -87,6 +94,15 @@ pub struct AccessControl {
     pub groups: HashMap<String, GroupPermissions>,
 }
 
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq, Default)]
+#[archive(check_bytes)]
+pub enum TemplateAccess {
+    #[default]
+    Default,
+    LimitedComment,
+    LimitedView,
+}
+
 /// Represents a template for creating new bugs.
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq, Default)]
 #[archive(check_bytes)]
@@ -104,6 +120,7 @@ pub struct BugTemplate {
     pub collaborators: Vec<String>,
     pub cc: Vec<String>,
     pub comment: Option<String>,
+    pub default_access: TemplateAccess,
 }
 
 /// Represents metadata for a component (folder).
@@ -231,11 +248,7 @@ impl HasVersion for AccessMetadata {
 }
 
 impl BugMetadata {
-    pub fn access_level(&self, root: &std::path::Path, username: &str) -> UserAccessLevel {
-        // 1. Check hierarchical component permissions
-        let path_str = self.folders.join("/");
-        let resolved_meta = resolve_component_metadata(root, &path_str);
-        
+    pub fn access_level(&self, resolved_meta: &ComponentMetadata, username: &str) -> UserAccessLevel {
         let mut max_level = UserAccessLevel::None;
 
         for group in resolved_meta.access_control.groups.values() {
@@ -299,8 +312,8 @@ pub struct BugMetadata {
     pub access: AccessMetadata,
     /// Brief title describing the bug.
     pub title: String,
-    /// Hierarchical components/folders the bug belongs to.
-    pub folders: Vec<String>,
+    /// Hierarchical component ID the bug belongs to.
+    pub component_id: u32,
     /// Markdown-formatted description of the bug.
     pub description: String,
     /// Additional user-defined metadata entries.
@@ -364,8 +377,8 @@ pub struct BugSummary {
 pub struct AppState {
     /// The root directory where bug data is stored.
     pub root: PathBuf,
-    /// Cache mapping bug IDs to folder locations.
-    pub cache: Mutex<BugIdCache>,
+    /// Cache mapping bug IDs to folder locations and tracking next IDs.
+    pub bug_cache: BugIdCache,
     /// Cache mapping component IDs to folder locations.
     pub component_cache: Mutex<ComponentIdCache>,
     /// Per-bug locks to synchronize modifications.
@@ -465,28 +478,36 @@ fn sanitize_name(name: &str) -> String {
 }
 
 /// Creates a new component. 
-/// NOTE: Creating components at the root level via the API is strictly banned.
+/// NOTE: Creating components at the root level via the API is STRICTLY FORBIDDEN.
+/// NO BOOTSTRAP LOGIC IS ALLOWED. ROOT COMPONENTS ARE MANUAL ONLY.
 /// 
 /// Process:
 /// 1. Resolve the parent's hierarchical path using the `parent_id` and the component cache.
 /// 2. Verify that the parent directory exists on disk.
 /// 3. Resolve the full merged metadata for the parent to check permissions.
-/// 4. Check if the requesting user has `ComponentAdmin` permissions on the parent.
-/// 5. Scan the parent directory to ensure no sub-component already has the same display name.
-/// 6. Sanitize the new component name for use as a folder name.
-/// 7. Generate a unique folder name by appending a numeric suffix if a collision occurs on disk.
-/// 8. Create the new directory.
-/// 9. Initialize the child's access control groups by cloning the parent's groups.
-/// 10. Ensure the creator is added to the "Component Admins" group.
-/// 11. Obtain a lock on the `component_cache` to generate a new unique component ID.
-/// 12. Register the new ID and path in the cache.
-/// 13. Construct the `ComponentMetadata` object with the new ID and default template.
-/// 14. Serialize and write the metadata to "component_metadata" in the new folder.
+/// 4. STRICTLY FORBID root component creation (parent_id 0).
+/// 5. Check if the requesting user has `ComponentAdmin` permissions on the parent.
+/// 6. Scan the parent directory to ensure no sub-component already has the same display name.
+/// 7. Sanitize the new component name for use as a folder name.
+/// 8. Generate a unique folder name by appending a numeric suffix if a collision occurs on disk.
+/// 9. Create the new directory.
+/// 10. Initialize the child's access control groups by cloning the parent's groups.
+/// 11. Ensure the creator is added to the "Component Admins" group.
+/// 12. Obtain a lock on the `component_cache` to generate a new unique component ID.
+/// 13. Register the new ID and path in the cache.
+/// 14. Construct the `ComponentMetadata` object with the new ID and default template.
+/// 15. Serialize and write the metadata to "component_metadata" in the new folder.
 pub async fn create_component(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<CreateComponentRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // 1. Resolve parent path
+    // STRICT MANDATE: Root component creation via API is FORBIDDEN. 
+    // parent_id 0 represents the root, and we must never allow creating children of root via API.
+    if payload.parent_id == 0 {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let (parent_path_str, parent_path) = {
         let cache = state.component_cache.lock().unwrap();
         let path_str = cache.get_path(payload.parent_id).ok_or(StatusCode::NOT_FOUND)?;
@@ -619,6 +640,123 @@ pub async fn create_component(
     fs::write(component_path.join("component_metadata"), bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::CREATED)
+}
+
+/// Request payload for creating a new bug.
+#[derive(SerdeDeserialize)]
+pub struct CreateBugRequest {
+    pub u: String,
+    pub component_id: u32,
+    pub template_name: String,
+    pub title: String,
+    pub description: String,
+    #[serde(rename = "type")]
+    pub bug_type: Option<String>,
+    pub priority: Option<String>,
+    pub severity: Option<String>,
+    pub assignee: Option<String>,
+    pub verifier: Option<String>,
+    pub collaborators: Vec<String>,
+    pub cc: Vec<String>,
+    pub created_at: Option<u64>,
+}
+
+/// Creates a new bug in a component.
+/// 
+/// Process:
+/// 1. Resolve the component path using the `component_id`.
+/// 2. Verify the component exists.
+/// 3. Resolve the component's hierarchical metadata.
+/// 4. Check if the user has `CreateIssues` permission.
+/// 5. Retrieve the specified template (or the default one).
+/// 6. Determine the next available bug ID using the `BugIdCache`.
+/// 7. Initialize `BugMetadata` using a mix of provided values, template values, and component defaults.
+/// 8. Apply template-based access control (Default, Limited Comment, Limited View).
+/// 9. Create the bug's directory (named by its ID) inside the component folder.
+/// 10. Persist the `BugMetadata` to a "metadata" file in the bug directory.
+/// 11. Create the initial bug description as "comment_0000001".
+/// 12. Update the `BugIdCache` with the new bug's ID and hierarchical location.
+pub async fn create_bug(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<CreateBugRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    // 1 & 2. Resolve component path
+    let (component_path_str, component_path) = {
+        let cache = state.component_cache.lock().unwrap();
+        let path_str = cache.get_path(payload.component_id).ok_or(StatusCode::NOT_FOUND)?;
+        let path = state.root.join(path_str.replace('/', std::path::MAIN_SEPARATOR_STR));
+        (path_str, path)
+    };
+
+    if !component_path.exists() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    // 3. Resolve metadata
+    let component_meta = resolve_component_metadata(&state.root, &component_path_str);
+
+    // 4. Permission check
+    if !component_meta.has_permission(&payload.u, &Permission::CreateIssues) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // 5. Get template, if it doesn't exist fail.
+    let template = component_meta.templates.get(&payload.template_name)
+        .ok_or(StatusCode::BAD_REQUEST)?;
+
+    // 6. Generate ID
+    let new_id = state.bug_cache.get_next_bug_id();
+    state.bug_cache.insert_bug(new_id as u64, component_path_str.split('/').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect());
+    let _ = state.bug_cache.save(&state.root);
+
+    // 7. Initialize metadata
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let created_at = payload.created_at.unwrap_or(now.as_nanos() as u64);
+
+    // 8. Apply template-based access control
+    let mut access = AccessMetadata::default();
+    match template.default_access {
+        TemplateAccess::Default => {},
+        TemplateAccess::LimitedComment => {
+            access.comment_access.push("PUBLIC".to_string());
+        },
+        TemplateAccess::LimitedView => {
+            access.view_access.push("PUBLIC".to_string());
+        }
+    }
+
+    let metadata = BugMetadata {
+        version: CURRENT_VERSION,
+        id: new_id,
+        reporter: payload.u.clone(),
+        bug_type: payload.bug_type.or(template.bug_type.clone()).unwrap_or_else(|| component_meta.bug_type.clone().unwrap_or_else(|| "Bug".to_string())),
+        priority: payload.priority.or(template.priority.clone()).unwrap_or_else(|| component_meta.priority.clone().unwrap_or_else(|| "P2".to_string())),
+        severity: payload.severity.or(template.severity.clone()).unwrap_or_else(|| component_meta.severity.clone().unwrap_or_else(|| "S2".to_string())),
+        status: "New".to_string(),
+        assignee: payload.assignee.or(template.assignee.clone()).unwrap_or_default(),
+        verifier: payload.verifier.or(template.verifier.clone()).unwrap_or_else(|| component_meta.verifier.clone().unwrap_or_default()),
+        collaborators: if !payload.collaborators.is_empty() { payload.collaborators.clone() } else { template.collaborators.clone() },
+        cc: if !payload.cc.is_empty() { payload.cc.clone() } else { template.cc.clone() },
+        access,
+        title: if payload.title.is_empty() { template.title.clone() } else { payload.title.clone() },
+        component_id: payload.component_id,
+        description: if payload.description.is_empty() { template.description.clone() } else { payload.description.clone() },
+        user_metadata: vec![],
+        created_at,
+        state_id: 1,
+    };
+
+    // 9. Create directory
+    let bug_dir = component_path.join(new_id.to_string());
+    fs::create_dir_all(&bug_dir).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // 10. Persist metadata
+    let bytes = rkyv::to_bytes::<_, 8192>(&metadata).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    fs::write(bug_dir.join("metadata"), bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(new_id))
 }
 
 /// Request payload for adding a template.
@@ -895,7 +1033,13 @@ pub async fn get_bug_list(
         };
         
         // Check view access
-        if metadata.access_level(&state.root, &u) < UserAccessLevel::View {
+        let component_path = {
+            let cache = state.component_cache.lock().unwrap();
+            cache.get_path(metadata.component_id).unwrap_or_default()
+        };
+        let resolved_meta = resolve_component_metadata(&state.root, &component_path);
+
+        if metadata.access_level(&resolved_meta, &u) < UserAccessLevel::View {
             continue;
         }
 
@@ -938,7 +1082,14 @@ pub async fn get_bug(
     let metadata: BugMetadata = read_versioned::<BugMetadata>(&metadata_data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if metadata.access_level(&state.root, &query.u) < UserAccessLevel::View {
+    let (resolved_meta, folders) = {
+        let component_cache = state.component_cache.lock().unwrap();
+        let path = component_cache.get_path(metadata.component_id).unwrap_or_default();
+        let folders = path.split('/').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect();
+        (resolve_component_metadata(&state.root, &path), folders)
+    };
+
+    if metadata.access_level(&resolved_meta, &query.u) < UserAccessLevel::View {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -960,7 +1111,7 @@ pub async fn get_bug(
     Ok(Json(Bug {
         id: metadata.id,
         title: metadata.title.clone(),
-        folders: metadata.folders.clone(),
+        folders,
         state_id: metadata.state_id,
         metadata,
         comments,
@@ -988,7 +1139,13 @@ pub async fn get_bug_state(
     let metadata: BugMetadata = read_versioned::<BugMetadata>(&metadata_data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if metadata.access_level(&state.root, &query.u) < UserAccessLevel::View {
+    let resolved_meta = {
+        let component_cache = state.component_cache.lock().unwrap();
+        let path = component_cache.get_path(metadata.component_id).unwrap_or_default();
+        resolve_component_metadata(&state.root, &path)
+    };
+
+    if metadata.access_level(&resolved_meta, &query.u) < UserAccessLevel::View {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1039,7 +1196,13 @@ pub async fn submit_comment(
     let mut metadata: BugMetadata = read_versioned::<BugMetadata>(&data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if metadata.access_level(&state.root, &payload.u) < UserAccessLevel::Comment {
+    let resolved_meta = {
+        let component_cache = state.component_cache.lock().unwrap();
+        let path = component_cache.get_path(metadata.component_id).unwrap_or_default();
+        resolve_component_metadata(&state.root, &path)
+    };
+
+    if metadata.access_level(&resolved_meta, &payload.u) < UserAccessLevel::Comment {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1050,19 +1213,8 @@ pub async fn submit_comment(
     fs::write(&metadata_file, bytes)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let mut next_comment_id = 1;
-    if let Ok(dir) = fs::read_dir(&bug_path) {
-        for entry in dir.filter_map(|e| e.ok()) {
-            let name = entry.file_name().into_string().unwrap_or_default();
-            if name.starts_with("comment_") {
-                if let Ok(cid) = name["comment_".len()..].parse::<u32>() {
-                    if cid >= next_comment_id {
-                        next_comment_id = cid + 1;
-                    }
-                }
-            }
-        }
-    }
+    let next_comment_id = state.bug_cache.get_next_comment_id(id as u64);
+    let _ = state.bug_cache.save(&state.root);
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1130,7 +1282,13 @@ pub async fn change_metadata(
     let mut metadata: BugMetadata = read_versioned::<BugMetadata>(&data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if metadata.access_level(&state.root, &payload.u) < UserAccessLevel::Full {
+    let resolved_meta = {
+        let component_cache = state.component_cache.lock().unwrap();
+        let path = component_cache.get_path(metadata.component_id).unwrap_or_default();
+        resolve_component_metadata(&state.root, &path)
+    };
+
+    if metadata.access_level(&resolved_meta, &payload.u) < UserAccessLevel::Full {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1169,8 +1327,7 @@ pub async fn change_metadata(
 
 /// Helper function to locate the directory path of a bug given its ID using the cache.
 pub fn find_bug_path(state: &AppState, id: u32) -> Option<PathBuf> {
-    let cache = state.cache.lock().ok()?;
-    cache.get_path(&state.root, id as u64)
+    state.bug_cache.get_path(&state.root, id as u64)
 }
 
 /// Safely reads versioned rkyv data.

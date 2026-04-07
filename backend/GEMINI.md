@@ -17,9 +17,13 @@ This document captures the architectural decisions, conventions, and "tribal kno
 - **Admin Overrides:** Users with `ComponentAdmin` or `AdminIssues` permissions on a component automatically receive `Full` access to all bugs within that component hierarchy.
 
 ### Bug ID Management
-- **BugIdCache:** To avoid expensive full-disk scans, the `BugIdCache` maintains a mapping of Bug IDs to their component paths.
+- **BugIdCache:** To avoid expensive full-disk scans, the `BugIdCache` maintains a mapping of Bug IDs to their component paths and tracks the next available Bug and Comment IDs.
 - **Location:** The cache implementation resides in `backend/src/bug_id_cache.rs`.
 - **Integrity:** Folder names that are purely numeric are treated as Bug IDs. Components (folders) cannot have purely numeric names.
+
+### Bug Content
+- **Description:** The bug's initial description is stored directly within `BugMetadata` and NOT as a separate comment. 
+- **Comments:** Comments are sequential updates to the bug, stored as individual files (e.g., `comment_0000001`). The first comment is NOT the description.
 
 ## Conventions & Standards
 
@@ -30,7 +34,10 @@ This document captures the architectural decisions, conventions, and "tribal kno
 ### API Design
 - **State Identification:** Every bug and component has a `state_id` (represented as `u64` in Rust, `bigint` in TS). This must be incremented on every modification to support frontend caching and optimistic concurrency.
 - **Username Requirement:** Most API calls require a `u` (username) parameter for access control enforcement.
-- **Root Protection:** Creation of components at the absolute root via the API is **strictly forbidden** to maintain hierarchical integrity. Root components must be bootstrapped via manual disk configuration.
+- **Root Protection (STRICT):** Creation of components at the absolute root via the API is **STRICTLY FORBIDDEN**. NO BOOTSTRAP LOGIC IS ALLOWED IN THE API TO CIRCUMVENT THIS. Root components must be bootstrapped via manual disk configuration (creating the folder and `component_metadata` file manually). Any attempt to create a component with `parent_id` 0 or equivalent via the API must be rejected.
+- **NO ROOT CREATION:** To be clear, the API must NEVER create a component at the root. Root components are strictly manual.
+- **STRICT FORBIDDEN:** Creating components at the root level via the API is strictly banned. NO EXCEPTIONS.
+- **MANUAL ONLY:** Root components must be created by an administrator directly on the server's filesystem.
 
 ### Serialization (The "n" Suffix)
 - Rust `u64` fields are serialized to JSON as strings with an "n" suffix (e.g., `"123n"`).
