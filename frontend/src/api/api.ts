@@ -9,6 +9,19 @@ declare const USE_FAKE_API: boolean;
 // Default value if not defined by esbuild
 const use_fake = typeof USE_FAKE_API !== 'undefined' ? USE_FAKE_API : false;
 
+export type Permission = 
+  | 'ComponentAdmin'
+  | 'CreateIssues'
+  | 'AdminIssues'
+  | 'EditIssues'
+  | 'CommentOnIssues'
+  | 'ViewIssues';
+
+export type TemplateAccess = 
+  | 'Default'
+  | 'LimitedComment'
+  | 'LimitedView';
+
 export interface UserMetadataEntry {
   version: number;
   key: string;
@@ -36,10 +49,11 @@ export interface BugTemplate {
   collaborators: string[];
   cc: string[];
   comment?: string;
+  default_access: TemplateAccess;
 }
 
 export interface GroupPermissions {
-  permissions: string[];
+  permissions: Permission[];
   view_level: number;
   members: string[];
 }
@@ -50,6 +64,7 @@ export interface AccessControl {
 
 export interface ComponentMetadata {
   version: number;
+  id: number;
   name: string;
   description: string;
   creator: string;
@@ -80,7 +95,7 @@ export interface BugMetadata {
   cc: string[];
   access: AccessMetadata;
   title: string;
-  folders: string[];
+  component_id: number;
   description: string;
   user_metadata: UserMetadataEntry[];
   created_at: bigint;
@@ -107,6 +122,27 @@ export interface Bug {
 export interface BugSummary {
   id: number;
   title: string;
+}
+
+export interface CreateBugRequest {
+  component_id: number;
+  template_name: string;
+  title: string;
+  description: string;
+  type?: string;
+  priority?: string;
+  severity?: string;
+  assignee?: string;
+  verifier?: string;
+  collaborators: string[];
+  cc: string[];
+  created_at?: bigint;
+}
+
+export interface CreateComponentRequest {
+  name: string;
+  description: string;
+  parent_id: number;
 }
 
 export function bigIntReplacer(_key: string, value: any): any {
@@ -161,11 +197,13 @@ export interface API {
   get_bug_state(username: string, id: number): Promise<Result<bigint, StatusError>>;
   submit_comment(username: string, id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>>;
   change_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>>;
-  get_component_metadata(username: string, path: string): Promise<Result<ComponentMetadata, StatusError>>;
+  get_component_metadata(username: string, id: number): Promise<Result<ComponentMetadata, StatusError>>;
   get_component_list(username: string): Promise<Result<string[], StatusError>>;
-  add_template(username: string, path: string, template: BugTemplate): Promise<Result<void, StatusError>>;
-  modify_template(username: string, path: string, old_name: string, template: BugTemplate): Promise<Result<void, StatusError>>;
-  delete_template(username: string, path: string, name: string): Promise<Result<void, StatusError>>;
+  add_template(username: string, id: number, template: BugTemplate): Promise<Result<void, StatusError>>;
+  modify_template(username: string, id: number, old_name: string, template: BugTemplate): Promise<Result<void, StatusError>>;
+  delete_template(username: string, id: number, name: string): Promise<Result<void, StatusError>>;
+  create_component(username: string, request: CreateComponentRequest): Promise<Result<void, StatusError>>;
+  create_bug(username: string, request: CreateBugRequest): Promise<Result<number, StatusError>>;
 }
 
 let api_singleton: Optional<API> = None;

@@ -1,7 +1,7 @@
 import type { Result } from 'standard-ts-lib/src/result';
 import { StatusError, InternalError } from 'standard-ts-lib/src/status_error';
 import { WrapPromise } from 'standard-ts-lib/src/wrap_promise';
-import { type API, type Bug, type BugSummary, type SubmitCommentResponse, type ChangeMetadataResponse, bigIntReviver, bigIntReplacer } from './api';
+import { type API, type Bug, type BugSummary, type SubmitCommentResponse, type ChangeMetadataResponse, type ComponentMetadata, type BugTemplate, type CreateComponentRequest, type CreateBugRequest, bigIntReviver, bigIntReplacer } from './api';
 
 const BACKEND_URL = 'http://localhost:9000';
 
@@ -78,10 +78,9 @@ export class BackendApi implements API {
     );
   }
 
-  async get_component_metadata(username: string, path: string): Promise<Result<ComponentMetadata, StatusError>> {
-    const url = new URL(`${BACKEND_URL}/api/component_metadata`);
+  async get_component_metadata(username: string, id: number): Promise<Result<ComponentMetadata, StatusError>> {
+    const url = new URL(`${BACKEND_URL}/api/component/${id}/get_metadata`);
     url.searchParams.append('u', username);
-    url.searchParams.append('path', path);
     return WrapPromise(
       fetch(url.toString()).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
@@ -105,12 +104,12 @@ export class BackendApi implements API {
     );
   }
 
-  async add_template(username: string, path: string, template: BugTemplate): Promise<Result<void, StatusError>> {
+  async add_template(username: string, id: number, template: BugTemplate): Promise<Result<void, StatusError>> {
     return WrapPromise(
-      fetch(`${BACKEND_URL}/api/add_template`, {
+      fetch(`${BACKEND_URL}/api/component/${id}/add_template`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ u: username, path, template }, bigIntReplacer)
+        body: JSON.stringify({ u: username, template }, bigIntReplacer)
       }).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
       }),
@@ -118,12 +117,12 @@ export class BackendApi implements API {
     );
   }
 
-  async modify_template(username: string, path: string, old_name: string, template: BugTemplate): Promise<Result<void, StatusError>> {
+  async modify_template(username: string, id: number, old_name: string, template: BugTemplate): Promise<Result<void, StatusError>> {
     return WrapPromise(
-      fetch(`${BACKEND_URL}/api/modify_template`, {
+      fetch(`${BACKEND_URL}/api/component/${id}/modify_template`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ u: username, path, old_name, template }, bigIntReplacer)
+        body: JSON.stringify({ u: username, old_name, template }, bigIntReplacer)
       }).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
       }),
@@ -131,16 +130,44 @@ export class BackendApi implements API {
     );
   }
 
-  async delete_template(username: string, path: string, name: string): Promise<Result<void, StatusError>> {
+  async delete_template(username: string, id: number, name: string): Promise<Result<void, StatusError>> {
     return WrapPromise(
-      fetch(`${BACKEND_URL}/api/delete_template`, {
+      fetch(`${BACKEND_URL}/api/component/${id}/delete_template`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ u: username, path, name }, bigIntReplacer)
+        body: JSON.stringify({ u: username, name }, bigIntReplacer)
       }).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
       }),
       'Failed to delete template'
+    );
+  }
+
+  async create_component(username: string, request: CreateComponentRequest): Promise<Result<void, StatusError>> {
+    return WrapPromise(
+      fetch(`${BACKEND_URL}/api/create_component`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...request, u: username }, bigIntReplacer)
+      }).then(async resp => {
+        if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
+      }),
+      'Failed to create component'
+    );
+  }
+
+  async create_bug(username: string, request: CreateBugRequest): Promise<Result<number, StatusError>> {
+    return WrapPromise(
+      fetch(`${BACKEND_URL}/api/create_bug`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...request, u: username }, bigIntReplacer)
+      }).then(async resp => {
+        if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
+        const text = await resp.text();
+        return JSON.parse(text, bigIntReviver) as number;
+      }),
+      'Failed to create bug'
     );
   }
 }

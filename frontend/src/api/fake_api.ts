@@ -1,6 +1,6 @@
 import { type Result, Ok, Err } from 'standard-ts-lib/src/result';
 import { StatusError, NotFoundError } from 'standard-ts-lib/src/status_error';
-import type { API, Bug, BugSummary, ChangeMetadataResponse, SubmitCommentResponse } from './api';
+import type { API, Bug, BugSummary, ChangeMetadataResponse, SubmitCommentResponse, ComponentMetadata, BugTemplate, CreateComponentRequest, CreateBugRequest } from './api';
 
 export class FakeApi implements API {
   private mockBugs: Bug[] = [
@@ -27,7 +27,7 @@ export class FakeApi implements API {
           view_access: []
         },
         title: "Bumping gradle from 8.11.x to higher major versions causes androidTest compile failures",
-        folders: ["Android Public Tracker", "App Development", "Jetpack (androidx)"],
+        component_id: 1,
         description: "Compiling androidTest fails when upgrading from 8.11.x to 8.12 or higher. This seems to be related to the new dependency resolution engine.",
         user_metadata: [
           { version: 1, key: "Hotlist", value: "AndroidGradlePlugin", type: "string" },
@@ -110,11 +110,12 @@ export class FakeApi implements API {
     });
   }
 
-  async get_component_metadata(username: string, path: string): Promise<Result<ComponentMetadata, StatusError>> {
+  async get_component_metadata(username: string, id: number): Promise<Result<ComponentMetadata, StatusError>> {
     return Ok({
       version: 1,
-      name: path.split('/').pop() || "",
-      description: `Description for ${path}`,
+      id,
+      name: "Mock Component",
+      description: `Description for component ${id}`,
       creator: "admin@example.com",
       bug_type: "Bug",
       priority: "P2",
@@ -136,7 +137,8 @@ export class FakeApi implements API {
           description: "",
           title: "",
           collaborators: [],
-          cc: []
+          cc: [],
+          default_access: "Default"
         }
       },
       default_template: "",
@@ -157,16 +159,24 @@ export class FakeApi implements API {
     return Ok(Array.from(components).sort());
   }
 
-  async add_template(username: string, path: string, template: BugTemplate): Promise<Result<void, StatusError>> {
+  async add_template(username: string, id: number, template: BugTemplate): Promise<Result<void, StatusError>> {
     return Ok(undefined);
   }
 
-  async modify_template(username: string, path: string, old_name: string, template: BugTemplate): Promise<Result<void, StatusError>> {
+  async modify_template(username: string, id: number, old_name: string, template: BugTemplate): Promise<Result<void, StatusError>> {
     return Ok(undefined);
   }
 
-  async delete_template(username: string, path: string, name: string): Promise<Result<void, StatusError>> {
+  async delete_template(username: string, id: number, name: string): Promise<Result<void, StatusError>> {
     return Ok(undefined);
+  }
+
+  async create_component(username: string, request: CreateComponentRequest): Promise<Result<void, StatusError>> {
+    return Ok(undefined);
+  }
+
+  async create_bug(username: string, request: CreateBugRequest): Promise<Result<number, StatusError>> {
+    return Ok(Math.floor(Math.random() * 1000000));
   }
 }
 
