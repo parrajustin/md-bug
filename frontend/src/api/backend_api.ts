@@ -1,7 +1,7 @@
 import type { Result } from 'standard-ts-lib/src/result';
 import { StatusError, InternalError } from 'standard-ts-lib/src/status_error';
 import { WrapPromise } from 'standard-ts-lib/src/wrap_promise';
-import { type API, type Bug, type BugSummary, type SubmitCommentResponse, type ChangeMetadataResponse, type ComponentMetadata, type BugTemplate, type CreateComponentRequest, type CreateBugRequest, bigIntReviver, bigIntReplacer } from './api';
+import { type API, type Bug, type BugSummary, type SubmitCommentResponse, type ChangeMetadataResponse, type BugStateResponse, type ComponentMetadata, type BugTemplate, type CreateComponentRequest, type CreateBugRequest, bigIntReviver, bigIntReplacer } from './api';
 
 const BACKEND_URL = 'http://localhost:9000';
 
@@ -34,15 +34,14 @@ export class BackendApi implements API {
     );
   }
 
-  async get_bug_state(username: string, id: number): Promise<Result<bigint, StatusError>> {
+  async get_bug_state(username: string, id: number): Promise<Result<BugStateResponse, StatusError>> {
     const url = new URL(`${BACKEND_URL}/api/bug/${id}/state`);
     url.searchParams.append('u', username);
     return WrapPromise(
       fetch(url.toString()).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
         const text = await resp.text();
-        const json = JSON.parse(text, bigIntReviver);
-        return json.state_id;
+        return JSON.parse(text, bigIntReviver) as BugStateResponse;
       }),
       `Failed to fetch state for bug ${id}`
     );

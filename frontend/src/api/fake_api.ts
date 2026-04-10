@@ -1,6 +1,6 @@
 import { type Result, Ok, Err } from 'standard-ts-lib/src/result';
 import { StatusError, NotFoundError } from 'standard-ts-lib/src/status_error';
-import type { API, Bug, BugSummary, ChangeMetadataResponse, SubmitCommentResponse, ComponentMetadata, BugTemplate, CreateComponentRequest, CreateBugRequest } from './api';
+import type { API, Bug, BugSummary, ChangeMetadataResponse, SubmitCommentResponse, BugStateResponse, ComponentMetadata, BugTemplate, CreateComponentRequest, CreateBugRequest } from './api';
 
 export class FakeApi implements API {
   private mockBugs: Bug[] = [
@@ -66,10 +66,10 @@ export class FakeApi implements API {
     return Ok(bug);
   }
 
-  async get_bug_state(username: string, id: number): Promise<Result<bigint, StatusError>> {
+  async get_bug_state(username: string, id: number): Promise<Result<BugStateResponse, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
-    return Ok(bug.state_id);
+    return Ok({ state_id: bug.state_id });
   }
 
   async submit_comment(username: string, id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>> {

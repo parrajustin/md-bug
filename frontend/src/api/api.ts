@@ -187,14 +187,20 @@ export interface SubmitCommentResponse {
   state_id: bigint;
 }
 
+export interface BugStateResponse {
+  state_id: bigint;
+}
+
 export interface ChangeMetadataResponse {
   state_id: bigint;
 }
 
+export type UserAccessLevel = 'None' | 'View' | 'Comment' | 'Full';
+
 export interface API {
   get_bug_list(username: string, query?: string): Promise<Result<BugSummary[], StatusError>>;
   get_bug(username: string, id: number): Promise<Result<Bug, StatusError>>;
-  get_bug_state(username: string, id: number): Promise<Result<bigint, StatusError>>;
+  get_bug_state(username: string, id: number): Promise<Result<BugStateResponse, StatusError>>;
   submit_comment(username: string, id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>>;
   change_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>>;
   get_component_metadata(username: string, id: number): Promise<Result<ComponentMetadata, StatusError>>;
