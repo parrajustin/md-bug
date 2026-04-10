@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "CommonJS",
+    "lib": ["ESNext", "DOM"],
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "standard-ts-lib/*": ["../../standard-ts-lib/*"]
+    },
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": "dist",
+    "types": ["node", "jest"]
+  },
+  "include": ["**/*.ts", "../../standard-ts-lib/src/**/*.ts", "../frontend/src/**/*.ts"]
+}

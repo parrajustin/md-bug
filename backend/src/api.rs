@@ -31,6 +31,50 @@ where
     serializer.serialize_str(&format!("{}n", val))
 }
 
+/// Custom deserializer for u64 that handles strings with an "n" suffix or numbers.
+fn deserialize_u64_from_string_n<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct U64Visitor;
+
+    impl<'de> serde::de::Visitor<'de> for U64Visitor {
+        type Value = u64;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a u64 as a number or a string with an 'n' suffix")
+        }
+
+        fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(v)
+        }
+
+        fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            if v >= 0 {
+                Ok(v as u64)
+            } else {
+                Err(E::custom(format!("negative value: {}", v)))
+            }
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            let s = v.strip_suffix('n').unwrap_or(v);
+            s.parse::<u64>().map_err(E::custom)
+        }
+    }
+
+    deserializer.deserialize_any(U64Visitor)
+}
+
 /// Trait for types that support versioning.
 pub trait HasVersion {
     fn get_version(&self) -> u32;
@@ -142,7 +186,7 @@ pub struct ComponentMetadata {
     pub templates: HashMap<String, BugTemplate>,
     pub default_template: String,
     pub user_metadata: Vec<UserMetadataEntry>,
-    #[serde(serialize_with = "serialize_u64_as_string_n")]
+    #[serde(serialize_with = "serialize_u64_as_string_n", deserialize_with = "deserialize_u64_from_string_n")]
     pub created_at: u64,
 }
 
@@ -201,6 +245,7 @@ impl ComponentMetadata {
     /// Merges this metadata with a child's metadata, with the child taking precedence.
     pub fn merge(&self, child: &ComponentMetadata) -> ComponentMetadata {
         let mut merged = self.clone();
+        if child.id > 0 { merged.id = child.id; }
         if !child.name.is_empty() { merged.name = child.name.clone(); }
         if !child.description.is_empty() { merged.description = child.description.clone(); }
         if !child.creator.is_empty() { merged.creator = child.creator.clone(); }
@@ -319,10 +364,10 @@ pub struct BugMetadata {
     /// Additional user-defined metadata entries.
     pub user_metadata: Vec<UserMetadataEntry>,
     /// Creation timestamp in epoch nanoseconds.
-    #[serde(serialize_with = "serialize_u64_as_string_n")]
+    #[serde(serialize_with = "serialize_u64_as_string_n", deserialize_with = "deserialize_u64_from_string_n")]
     pub created_at: u64,
     /// Incremental ID representing the state of the bug.
-    #[serde(serialize_with = "serialize_u64_as_string_n")]
+    #[serde(serialize_with = "serialize_u64_as_string_n", deserialize_with = "deserialize_u64_from_string_n")]
     pub state_id: u64,
 }
 
@@ -342,7 +387,7 @@ pub struct Comment {
     /// The user who authored the comment.
     pub author: String,
     /// Timestamp when the server received the comment.
-    #[serde(serialize_with = "serialize_u64_as_string_n")]
+    #[serde(serialize_with = "serialize_u64_as_string_n", deserialize_with = "deserialize_u64_from_string_n")]
     pub epoch_nanoseconds: u64,
     /// Markdown-formatted content of the comment.
     pub content: String,
@@ -931,6 +976,52 @@ pub async fn delete_template(
 }
 
 
+/// Request payload for updating component metadata.
+#[derive(SerdeDeserialize)]
+pub struct UpdateComponentMetadataRequest {
+    pub u: String,
+    pub metadata: ComponentMetadata,
+}
+
+/// Updates the metadata for a specific component.
+pub async fn update_component_metadata(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<u32>,
+    Json(payload): Json<UpdateComponentMetadataRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    // 1. Lock component
+    let lock = state.get_component_lock(id);
+    let _guard = lock.lock().await;
+
+    // 2. Resolve path
+    let component_path = find_component_path(&state, id).ok_or(StatusCode::NOT_FOUND)?;
+    let meta_file = component_path.join("component_metadata");
+
+    if !meta_file.exists() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    // 3. Read old metadata for permission check
+    let data = fs::read(&meta_file).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let old_meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // 4. Permission check (only ComponentAdmin can update metadata)
+    if !old_meta.has_permission(&payload.u, &Permission::ComponentAdmin) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // 5. Validation: Ensure ID matches
+    if payload.metadata.id != id {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    // 6. Persist updated metadata
+    let bytes = rkyv::to_bytes::<_, 4096>(&payload.metadata).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    fs::write(&meta_file, bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::OK)
+}
+
 /// Retrieves the resolved metadata for a specific component.
 /// 
 /// Process:
@@ -962,7 +1053,7 @@ pub async fn get_component_metadata(
 /// 3. Collect unique paths into a sorted list and return as JSON.
 pub async fn get_component_list(
     State(state): State<Arc<AppState>>,
-    Query(_query): Query<BugQuery>,
+    Query(query): Query<BugQuery>,
 ) -> impl IntoResponse {
     let mut components = std::collections::HashSet::new();
 
@@ -989,7 +1080,11 @@ pub async fn get_component_list(
         if let Ok(relative_path) = path.strip_prefix(&state.root) {
             let path_str = relative_path.to_string_lossy().replace('\\', "/");
             if !path_str.is_empty() {
-                components.insert(path_str);
+                // Permission check
+                let resolved_meta = resolve_component_metadata(&state.root, &path_str);
+                if resolved_meta.has_permission(&query.u, &Permission::ViewIssues) {
+                    components.insert(path_str);
+                }
             }
         }
     }
@@ -1338,14 +1433,16 @@ where
     T: rkyv::Archive + HasVersion,
     T::Archived: for<'a> rkyv::CheckBytes<rkyv::validation::validators::DefaultValidator<'a>> + rkyv::Deserialize<T, rkyv::de::deserializers::SharedDeserializeMap>,
 {
-    let val: T = rkyv::from_bytes::<T>(data).map_err(|e| format!("Rkyv deserialization error: {:?}", e))?;
-    
-    if val.get_version() != CURRENT_VERSION {
-        // Migration logic would go here if we had multiple versions.
-        // If the schema is backward compatible, val might already be usable.
+    match rkyv::from_bytes::<T>(data) {
+        Ok(val) => {
+            Ok(val)
+        }
+        Err(e) => {
+            let err_msg = format!("Rkyv deserialization error: {:?}", e);
+            tracing::error!("{}", err_msg);
+            Err(err_msg)
+        }
     }
-
-    Ok(val)
 }
 
 #[cfg(test)]

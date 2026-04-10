@@ -1,6 +1,6 @@
 import { type Result, Ok, Err } from 'standard-ts-lib/src/result';
 import { StatusError, NotFoundError } from 'standard-ts-lib/src/status_error';
-import type { API, Bug, BugSummary, ChangeMetadataResponse, SubmitCommentResponse, BugStateResponse, ComponentMetadata, BugTemplate, CreateComponentRequest, CreateBugRequest } from './api';
+import type { API, Bug, BugSummary, ChangeMetadataResponse, SubmitCommentResponse, BugStateResponse, ComponentMetadata, BugTemplate, CreateComponentRequest, CreateBugRequest, Permission, TemplateAccess } from './api';
 
 export class FakeApi implements API {
   private mockBugs: Bug[] = [
@@ -125,7 +125,7 @@ export class FakeApi implements API {
       access_control: {
         groups: {
           "Component Admins": {
-            permissions: ["ComponentAdmin", "ViewIssues"],
+            permissions: ["ComponentAdmin", "ViewIssues"] as Permission[],
             view_level: 999,
             members: ["admin@example.com"]
           }
@@ -138,7 +138,7 @@ export class FakeApi implements API {
           title: "",
           collaborators: [],
           cc: [],
-          default_access: "Default"
+          default_access: "Default" as TemplateAccess
         }
       },
       default_template: "",
@@ -157,6 +157,10 @@ export class FakeApi implements API {
       });
     });
     return Ok(Array.from(components).sort());
+  }
+
+  async update_component_metadata(username: string, id: number, metadata: ComponentMetadata): Promise<Result<void, StatusError>> {
+    return Ok(undefined);
   }
 
   async add_template(username: string, id: number, template: BugTemplate): Promise<Result<void, StatusError>> {

@@ -94,6 +94,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/bug/:id/comment", post(api::submit_comment))
         .route("/api/bug/:id/metadata", post(api::change_metadata))
         .route("/api/component/:id/get_metadata", get(api::get_component_metadata))
+        .route("/api/component/:id/update_metadata", post(api::update_component_metadata))
         .route("/api/component_list", get(api::get_component_list))
         .route("/api/create_component", post(api::create_component))
         .route("/api/create_bug", post(api::create_bug))
@@ -125,6 +126,7 @@ fn create_root_component(root: &Path, name: &str, admin_user_id: &str) -> anyhow
 
     // Load ID cache and generate new ID
     let mut component_cache = ComponentIdCache::default();
+    component_cache.id_to_path.insert(0, "".to_string()); // Ensure root is known
     component_cache.update_from_disk(root);
     let new_id = component_cache.get_next_id();
 
@@ -176,6 +178,8 @@ fn create_root_component(root: &Path, name: &str, admin_user_id: &str) -> anyhow
     let mut templates = HashMap::new();
     templates.insert("".to_string(), api::BugTemplate::default());
 
+    let user_metadata: Vec<api::UserMetadataEntry> = vec![];
+
     let meta = api::ComponentMetadata {
         version: api::CURRENT_VERSION,
         id: new_id,
@@ -191,7 +195,7 @@ fn create_root_component(root: &Path, name: &str, admin_user_id: &str) -> anyhow
         access_control: api::AccessControl { groups },
         templates,
         default_template: "".to_string(),
-        user_metadata: vec![],
+        user_metadata,
         created_at: now.as_nanos() as u64,
     };
 

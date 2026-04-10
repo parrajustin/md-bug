@@ -204,6 +204,7 @@ export interface API {
   submit_comment(username: string, id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>>;
   change_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>>;
   get_component_metadata(username: string, id: number): Promise<Result<ComponentMetadata, StatusError>>;
+  update_component_metadata(username: string, id: number, metadata: ComponentMetadata): Promise<Result<void, StatusError>>;
   get_component_list(username: string): Promise<Result<string[], StatusError>>;
   add_template(username: string, id: number, template: BugTemplate): Promise<Result<void, StatusError>>;
   modify_template(username: string, id: number, old_name: string, template: BugTemplate): Promise<Result<void, StatusError>>;
