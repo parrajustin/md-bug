@@ -471,7 +471,7 @@ pub struct CreateComponentRequest {
 }
 
 /// Helper to sanitize names for filesystem use.
-fn sanitize_name(name: &str) -> String {
+pub fn sanitize_name(name: &str) -> String {
     name.chars()
         .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
         .collect()

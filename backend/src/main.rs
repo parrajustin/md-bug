@@ -10,7 +10,7 @@ use axum::{
 use clap::Parser;
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -31,6 +31,12 @@ struct Args {
     /// Whether to generate fake data upon startup.
     #[arg(long, default_value = "false")]
     fake_data: bool,
+    /// Create a new root component with the given name and exit.
+    #[arg(long = "CreateRootComponent")]
+    create_root_component: Option<String>,
+    /// The user ID of the admin for the new root component. Required with --CreateRootComponent.
+    #[arg(long = "AdminUserId", requires = "create_root_component")]
+    admin_user_id: Option<String>,
 }
 
 #[tokio::main]
@@ -42,6 +48,13 @@ async fn main() -> anyhow::Result<()> {
     if !args.root.exists() {
         fs::create_dir_all(&args.root)?;
     }
+
+    if let Some(name) = args.create_root_component {
+        let admin_id = args.admin_user_id.expect("--AdminUserId is required when using --CreateRootComponent");
+        create_root_component(&args.root, &name, &admin_id)?;
+        return Ok(());
+    }
+
     println!("Root directory: {:?}", args.root);
     println!("Frontend directory: {:?}", args.frontend_dir);
     println!("Port: {:?}", args.port);
@@ -97,5 +110,94 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("listening on {}", listener.local_addr()?);
     axum::serve(listener, app).await?;
 
+    Ok(())
+}
+
+fn create_root_component(root: &Path, name: &str, admin_user_id: &str) -> anyhow::Result<()> {
+    let safe_name = api::sanitize_name(name);
+    let component_path = root.join(&safe_name);
+
+    if component_path.exists() {
+        anyhow::bail!("Component directory already exists: {:?}", component_path);
+    }
+
+    fs::create_dir_all(&component_path)?;
+
+    // Load ID cache and generate new ID
+    let mut component_cache = ComponentIdCache::default();
+    component_cache.update_from_disk(root);
+    let new_id = component_cache.get_next_id();
+
+    // Default groups setup (mirroring api.rs)
+    let mut groups = HashMap::new();
+    
+    // Component Admins
+    groups.insert("Component Admins".to_string(), api::GroupPermissions {
+        permissions: vec![
+            api::Permission::ComponentAdmin, api::Permission::CreateIssues, api::Permission::AdminIssues,
+            api::Permission::EditIssues, api::Permission::CommentOnIssues, api::Permission::ViewIssues
+        ],
+        view_level: 999,
+        members: vec![admin_user_id.to_string()],
+    });
+
+    // Issue Admins
+    groups.insert("Issue Admins".to_string(), api::GroupPermissions {
+        permissions: vec![
+            api::Permission::CreateIssues, api::Permission::AdminIssues,
+            api::Permission::EditIssues, api::Permission::CommentOnIssues, api::Permission::ViewIssues
+        ],
+        view_level: 500,
+        members: vec![],
+    });
+
+    // Issue Editors
+    groups.insert("Issue Editors".to_string(), api::GroupPermissions {
+        permissions: vec![
+            api::Permission::CreateIssues, api::Permission::EditIssues, 
+            api::Permission::CommentOnIssues, api::Permission::ViewIssues
+        ],
+        view_level: 100,
+        members: vec![],
+    });
+
+    // Issue Contributors
+    groups.insert("Issue Contributors".to_string(), api::GroupPermissions {
+        permissions: vec![
+            api::Permission::CreateIssues, api::Permission::CommentOnIssues, api::Permission::ViewIssues
+        ],
+        view_level: 1,
+        members: vec!["PUBLIC".to_string()],
+    });
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?;
+
+    let mut templates = HashMap::new();
+    templates.insert("".to_string(), api::BugTemplate::default());
+
+    let meta = api::ComponentMetadata {
+        version: api::CURRENT_VERSION,
+        id: new_id,
+        name: name.to_string(),
+        description: format!("Root component: {}", name),
+        creator: admin_user_id.to_string(),
+        bug_type: None,
+        priority: None,
+        severity: None,
+        verifier: None,
+        collaborators: vec![],
+        cc: vec![],
+        access_control: api::AccessControl { groups },
+        templates,
+        default_template: "".to_string(),
+        user_metadata: vec![],
+        created_at: now.as_nanos() as u64,
+    };
+
+    let bytes = rkyv::to_bytes::<_, 2048>(&meta).map_err(|e| anyhow::anyhow!("Serialization error: {:?}", e))?;
+    fs::write(component_path.join("component_metadata"), bytes)?;
+
+    println!("Successfully created root component '{}' with ID {} at {:?}", name, new_id, component_path);
     Ok(())
 }
