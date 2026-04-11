@@ -4,10 +4,10 @@
   "description": "Markdown bug viewer frontend",
   "main": "index.js",
   "scripts": {
-    "build": "esbuild src/index.tsx --bundle --outfile=public/bundle.js --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css --minify --define:USE_FAKE_API=false",
-    "build-dev": "esbuild src/index.tsx --bundle --outfile=public/bundle.js --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css --define:USE_FAKE_API=false",
-    "watch-dev": "esbuild src/index.tsx --bundle --outfile=public/bundle.js --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css --define:USE_FAKE_API=false --watch",
-    "fakeapi-build": "esbuild src/index.tsx --bundle --outfile=public/bundle.js --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css --minify --define:USE_FAKE_API=true",
+    "build": "esbuild src/index.tsx --bundle --outfile=public/bundle.js --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css --minify --define:USE_FAKE_API=false --define:DEBUG_MODE=false",
+    "build-dev": "esbuild src/index.tsx --bundle --outfile=public/bundle.js --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css --define:USE_FAKE_API=false --define:DEBUG_MODE=true",
+    "watch-dev": "esbuild src/index.tsx --bundle --outfile=public/bundle.js --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css --define:USE_FAKE_API=false --define:DEBUG_MODE=true --watch",
+    "fakeapi-build": "esbuild src/index.tsx --bundle --outfile=public/bundle.js --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css --minify --define:USE_FAKE_API=true --define:DEBUG_MODE=true",
     "serve": "npx serve public"
   },
   "dependencies": {

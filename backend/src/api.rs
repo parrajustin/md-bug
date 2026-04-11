@@ -429,6 +429,7 @@ pub struct Bug {
     pub id: u32,
     pub title: String,
     pub folders: Vec<String>,
+    pub folder_ids: Vec<u32>,
     pub metadata: BugMetadata,
     pub comments: Vec<Comment>,
     #[serde(serialize_with = "serialize_u64_as_string_n")]
@@ -1241,11 +1242,23 @@ pub async fn get_bug(
     let metadata: BugMetadata = read_versioned::<BugMetadata>(&metadata_data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let (resolved_meta, folders) = {
+    let (resolved_meta, folders, folder_ids) = {
         let component_cache = state.component_cache.lock().unwrap();
         let path = component_cache.get_path(metadata.component_id).unwrap_or_default();
-        let folders = path.split('/').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect();
-        (resolve_component_metadata(&state.root, &path), folders)
+        let mut folders = Vec::new();
+        let mut folder_ids = Vec::new();
+        let mut current_path = String::new();
+        for comp in path.split('/').filter(|s| !s.is_empty()) {
+            if !current_path.is_empty() {
+                current_path.push('/');
+            }
+            current_path.push_str(comp);
+            folders.push(comp.to_string());
+            if let Some(id) = component_cache.get_id(&current_path) {
+                folder_ids.push(id);
+            }
+        }
+        (resolve_component_metadata(&state.root, &path), folders, folder_ids)
     };
 
     if metadata.access_level(&resolved_meta, &query.u) < UserAccessLevel::View {
@@ -1271,6 +1284,7 @@ pub async fn get_bug(
         id: metadata.id,
         title: metadata.title.clone(),
         folders,
+        folder_ids,
         state_id: metadata.state_id,
         metadata,
         comments,

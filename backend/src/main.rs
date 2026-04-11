@@ -1,7 +1,7 @@
-mod api;
-mod fake_data;
-mod bug_id_cache;
-mod component_id_cache;
+use md_bug_backend::api;
+use md_bug_backend::fake_data;
+use md_bug_backend::bug_id_cache::BugIdCache;
+use md_bug_backend::component_id_cache::ComponentIdCache;
 
 use axum::{
     routing::{get, post},
@@ -13,9 +13,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tower_http::services::{ServeDir, ServeFile};
-
-use crate::bug_id_cache::BugIdCache;
-use crate::component_id_cache::ComponentIdCache;
 
 #[derive(Parser)]
 struct Args {

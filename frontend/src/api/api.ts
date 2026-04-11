@@ -115,6 +115,7 @@ export interface Bug {
   id: number;
   title: string;
   folders: string[];
+  folder_ids: number[];
   metadata: BugMetadata;
   comments: Comment[];
   state_id: bigint;

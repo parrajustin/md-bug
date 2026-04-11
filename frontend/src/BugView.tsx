@@ -6,6 +6,7 @@ import { WrapToResult } from 'standard-ts-lib/src/wrap_to_result';
 
 // Declare Temporal globally if it's not yet in the TypeScript definitions
 declare const Temporal: any;
+declare const DEBUG_MODE: boolean;
 
 interface BugViewProps {
   bug: Bug;
@@ -19,6 +20,13 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
   const [commentText, setCommentText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAccessModal, setShowAccessModal] = useState(false);
+
+  // Debugging: Log the bug data to console in debug mode
+  useEffect(() => {
+    if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
+      console.log('BugView data:', bug);
+    }
+  }, [bug]);
 
   // Synchronize local state when the bug prop changes (e.g., from a refresh)
   useEffect(() => {
@@ -121,6 +129,7 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
   };
 
   const hasCommentAccess = 
+    bug.metadata.reporter === username ||
     bug.metadata.access.full_access.includes(username) || 
     bug.metadata.access.full_access.includes('PUBLIC') || 
     bug.metadata.access.comment_access.includes(username) || 

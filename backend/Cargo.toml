@@ -20,3 +20,11 @@ bytecheck = "0.6.12"
 tempfile = "3.10.1"
 fake = "5.1.0"
 rand = "0.8"
+
+[[bin]]
+name = "md-bug-backend"
+path = "src/main.rs"
+
+[[bin]]
+name = "debug_tool"
+path = "src/debug_tool.rs"

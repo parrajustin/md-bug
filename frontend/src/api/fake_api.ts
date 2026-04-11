@@ -8,6 +8,7 @@ export class FakeApi implements API {
       id: 423673307,
       title: "Bumping gradle from 8.11.x to higher major versions causes androidTest compile failures",
       folders: ["Android Public Tracker", "App Development", "Jetpack (androidx)"],
+      folder_ids: [3, 2, 1],
       metadata: {
         version: 1,
         id: 423673307,
