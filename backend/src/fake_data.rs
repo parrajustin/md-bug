@@ -34,9 +34,11 @@ pub fn generate_fake_data(root: &Path) {
         "Performance", "Documentation", "Testing", "DevOps", "Infrastructure"
     ];
 
-    let users_pool = vec![
-        "admin", "alice", "bob", "charlie", "dave", "eve", "frank", "grace", "heidi", "ivan", "judy", "mallory"
-    ];
+    let mut users_pool = Vec::new();
+    for _ in 10..20 {
+        let email: String = SafeEmail().fake();
+        users_pool.push(email);
+    }
 
     let priorities = ["P0", "P1", "P2", "P3", "P4"];
     let severities = ["S0", "S1", "S2", "S3", "S4"];
