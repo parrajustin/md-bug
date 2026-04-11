@@ -32,7 +32,7 @@ The following flags are available when running the backend:
 ### Example
 
 ```bash
-cargo run -- -r ./bug-data -p 9000
+cargo run --bin md-bug-backend -- -r ./bug-data -p 9000 --fake-data
 ```
 
 ## Testing
@@ -43,4 +43,10 @@ To run the tests:
 
 ```bash
 cargo test
+```
+
+## Debug
+
+```bash
+cargo run --bin debug_tool -- -r ./bug-data -c 1 -b 23
 ```
