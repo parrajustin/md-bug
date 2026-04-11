@@ -98,7 +98,7 @@ describe('Integration Test', () => {
      * - Setup: Sub-component 'Engineering' under 'Company' has no specific access control.
      * - Setup: Sub-component 'Frontend' under 'Engineering' has no specific access control.
      * - Test: 'CEO' should have 'Full' access to bugs in 'Frontend' and be able to update its metadata.
-     * - Validation: get_component_metadata('CEO', frontendId) returns success; update_metadata('CEO', bugInFrontendId) returns success.
+     * - Validation: get_component_metadata('CEO', frontendId) returns success; update_bug_metadata('CEO', bugInFrontendId) returns success.
      */
     console.log('Running Scenario 1...');
     const allId = await findComponentId('admin', 'all');
@@ -131,7 +131,7 @@ describe('Integration Test', () => {
     })).unsafeUnwrap();
 
     // CEO should be able to update bug metadata (Full access)
-    const changeRes = await api.update_metadata('CEO', bugId, 'status', 'In Progress');
+    const changeRes = await api.update_bug_metadata('CEO', bugId, 'status', 'In Progress');
     expect(changeRes.ok).toBe(true);
     
     const bug = (await api.get_bug('CEO', bugId)).unsafeUnwrap();
@@ -184,7 +184,7 @@ describe('Integration Test', () => {
      * - Setup: Component 'PrivateProject' is restricted to group 'ProjectMembers'. User 'Auditor' is NOT a member.
      * - Setup: A bug 'AuditReport' inside 'PrivateProject' is created.
      * - Setup: Admin grants 'Auditor' full access by adding them to the bug's metadata access list.
-     * - Note: In this test version, we use update_metadata to add Auditor to collaborators as a proxy for access, 
+     * - Note: In this test version, we use update_bug_metadata to add Auditor to collaborators as a proxy for access, 
      *         BUT since we need true Full Access for Scenario 3's description, and our update_bug_access 
      *         only supports predefined modes, we'll assume 'admin' can add Auditor to collaborators 
      *         and that grants some access, OR we implement a more granular update_bug_access.
@@ -213,7 +213,7 @@ describe('Integration Test', () => {
     })).unsafeUnwrap();
 
     // admin adds Auditor to full_access
-    await api.update_metadata('admin', bugId, 'full_access', 'Auditor');
+    await api.update_bug_metadata('admin', bugId, 'full_access', 'Auditor');
 
     const auditorList = (await api.get_component_list('Auditor')).unsafeUnwrap();
     const paths = auditorList.map(c => [...c.folders, c.name].join('/').toLowerCase());
@@ -222,7 +222,7 @@ describe('Integration Test', () => {
     const auditorBug = (await api.get_bug('Auditor', bugId)).unsafeUnwrap();
     expect(auditorBug.metadata.title).toBe('AuditReport');
 
-    const auditorChange = await api.update_metadata('Auditor', bugId, 'status', 'Audited');
+    const auditorChange = await api.update_bug_metadata('Auditor', bugId, 'status', 'Audited');
     expect(auditorChange.ok).toBe(true);
   });
 
@@ -232,7 +232,7 @@ describe('Integration Test', () => {
      * - Setup: User 'LeadDev' is in a group with 'AdminIssues' permission but NOT 'ComponentAdmin'.
      * - Test: 'LeadDev' should be able to change status/priority of any bug in the component.
      * - Test: 'LeadDev' should get 403 when trying to add a new bug template or update component description.
-     * - Validation: update_metadata('LeadDev', bugId, 'status', 'Fixed') returns success; add_template('LeadDev', componentId, ...) returns 403.
+     * - Validation: update_bug_metadata('LeadDev', bugId, 'status', 'Fixed') returns success; add_template('LeadDev', componentId, ...) returns 403.
      */
     console.log('Running Scenario 4...');
     const allId = await findComponentId('admin', 'all');
@@ -252,7 +252,7 @@ describe('Integration Test', () => {
       cc: []
     })).unsafeUnwrap();
 
-    const changeRes = await api.update_metadata('LeadDev', bugId, 'status', 'Fixed');
+    const changeRes = await api.update_bug_metadata('LeadDev', bugId, 'status', 'Fixed');
     expect(changeRes.ok).toBe(true);
 
     const addTemplateRes = await api.add_template('LeadDev', devId, {
@@ -356,7 +356,7 @@ describe('Integration Test', () => {
     const state2 = commentRes.unsafeUnwrap().state_id;
     expect(state2).toBe(state1 + 1n);
 
-    const metaRes = await api.update_metadata('admin', bugId, 'status', 'In Progress');
+    const metaRes = await api.update_bug_metadata('admin', bugId, 'status', 'In Progress');
     expect(metaRes.ok).toBe(true);
     const state3 = metaRes.unsafeUnwrap().state_id;
     expect(state3).toBe(state2 + 1n);
@@ -419,7 +419,7 @@ describe('Integration Test', () => {
   it('Edge Case 4: Update Title and Description', async () => {
     /**
      * Edge Case 4: Update Title and Description
-     * - Test: Use update_metadata to change title and description.
+     * - Test: Use update_bug_metadata to change title and description.
      * - Expected: Metadata is updated and persisted.
      */
     console.log('Running Edge Case 4...');
@@ -433,8 +433,8 @@ describe('Integration Test', () => {
       cc: []
     })).unsafeUnwrap();
 
-    await api.update_metadata('admin', bugId, 'title', 'New Title');
-    await api.update_metadata('admin', bugId, 'description', 'New Description');
+    await api.update_bug_metadata('admin', bugId, 'title', 'New Title');
+    await api.update_bug_metadata('admin', bugId, 'description', 'New Description');
 
     const bug = (await api.get_bug('admin', bugId)).unsafeUnwrap();
     expect(bug.metadata.title).toBe('New Title');
@@ -668,8 +668,8 @@ describe('Integration Test', () => {
     console.log('Running Scenario G...');
     const bugId = (await api.create_bug('admin', { component_id: 2, template_name: '', title: 'G Bug', description: '', collaborators: [], cc: [] })).unsafeUnwrap();
 
-    await api.update_metadata('admin', bugId, 'internal_id', '123');
-    await api.update_metadata('admin', bugId, 'internal_id', '456');
+    await api.update_bug_metadata('admin', bugId, 'internal_id', '123');
+    await api.update_bug_metadata('admin', bugId, 'internal_id', '456');
 
     const bug = (await api.get_bug('admin', bugId)).unsafeUnwrap();
     const internalIdEntries = bug.metadata.user_metadata.filter(m => m.key === 'internal_id');
@@ -682,7 +682,7 @@ describe('Integration Test', () => {
      * Scenario H "Verify Collaborator Soft-View Access"
      * - user "admin" creates root component "Private" (restricted to admin)
      * - user "admin" creates bug "Task" in "Private"
-     * - user "admin" adds user "helper" to "collaborators" list of bug "Task" via update_metadata
+     * - user "admin" adds user "helper" to "collaborators" list of bug "Task" via update_bug_metadata
      * - test that user "helper" can view the bug (get_bug) even though they cannot see the component in get_component_list.
      * - test that user "helper" can NOT comment on the bug (unless specifically granted comment access).
      * - This verifies that collaborators/CC receive "soft" view access to the specific bug.
@@ -703,7 +703,7 @@ describe('Integration Test', () => {
     const paths = helperListBefore.map(c => [...c.folders, c.name].join('/').toLowerCase());
     expect(paths).not.toContain('all/privateh');
 
-    await api.update_metadata('admin', bugId, 'collaborators', 'helper');
+    await api.update_bug_metadata('admin', bugId, 'collaborators', 'helper');
 
     const helperBug = await api.get_bug('helper', bugId);
     expect(helperBug.ok).toBe(true);
@@ -743,22 +743,22 @@ describe('Integration Test', () => {
     })).unsafeUnwrap();
 
     // Add BugFullAccess to bug-specific full_access
-    await api.update_metadata('admin', bugId, 'full_access', 'BugFullAccess');
+    await api.update_bug_metadata('admin', bugId, 'full_access', 'BugFullAccess');
 
     // 1. Editor should succeed
-    const res1 = await api.update_metadata('Editor', bugId, 'status', 'Assigned');
+    const res1 = await api.update_bug_metadata('Editor', bugId, 'status', 'Assigned');
     expect(res1.ok).toBe(true);
 
     // 2. IssueAdmin should succeed
-    const res2 = await api.update_metadata('IssueAdmin', bugId, 'status', 'Fixed');
+    const res2 = await api.update_bug_metadata('IssueAdmin', bugId, 'status', 'Fixed');
     expect(res2.ok).toBe(true);
 
     // 3. BugFullAccess should succeed
-    const res3 = await api.update_metadata('BugFullAccess', bugId, 'priority', 'P1');
+    const res3 = await api.update_bug_metadata('BugFullAccess', bugId, 'priority', 'P1');
     expect(res3.ok).toBe(true);
 
     // 4. Rando should fail
-    const res4 = await api.update_metadata('Rando', bugId, 'status', 'Verified');
+    const res4 = await api.update_bug_metadata('Rando', bugId, 'status', 'Verified');
     expect(res4.ok).toBe(false);
   });
 
@@ -791,5 +791,12 @@ describe('Integration Test', () => {
     const bug = (await api.get_bug('admin', bugId)).unsafeUnwrap();
     expect(bug.metadata.reporter).toBe('random');
     expect(bug.metadata.access.full_access).toContain('random');
+
+    // User "random" updates the metadata to validate they have full_access
+    const updateRes = await api.update_bug_metadata('random', bugId, 'priority', 'P0');
+    expect(updateRes.ok).toBe(true);
+
+    const updatedBug = (await api.get_bug('admin', bugId)).unsafeUnwrap();
+    expect(updatedBug.metadata.priority).toBe('P0');
   });
 });

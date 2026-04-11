@@ -66,7 +66,7 @@ export class BackendApi implements API {
     );
   }
 
-  async update_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>> {
+  async update_bug_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>> {
     return WrapPromise(
       fetch(`${this.baseUrl}/api/bug/${id}/update_metadata`, {
         method: 'POST',

@@ -92,7 +92,7 @@ export class FakeApi implements API {
     });
   }
 
-  async update_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>> {
+  async update_bug_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
     bug.metadata.state_id = (bug.metadata.state_id || 1n) + 1n;

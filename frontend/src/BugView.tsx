@@ -20,6 +20,11 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
   const [commentText, setCommentText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAccessModal, setShowAccessModal] = useState(false);
+  const [hasFullAccess, setHasFullAccess] = useState(false);
+  const [hasCommentAccess, setHasCommentAccess] = useState(false);
+
+  const [editTitle, setEditTitle] = useState(initialBug.title);
+  const [editDescription, setEditDescription] = useState(initialBug.metadata.description);
 
   // Debugging: Log the bug data to console in debug mode
   useEffect(() => {
@@ -31,7 +36,48 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
   // Synchronize local state when the bug prop changes (e.g., from a refresh)
   useEffect(() => {
     setBug(initialBug);
+    setEditTitle(initialBug.title);
+    setEditDescription(initialBug.metadata.description);
   }, [initialBug]);
+
+  // Determine access levels
+  useEffect(() => {
+    const checkAccess = async () => {
+      // Initial checks based on bug metadata
+      let full = bug.metadata.access.full_access.includes(username) || bug.metadata.access.full_access.includes('PUBLIC');
+      let comment = full || bug.metadata.access.comment_access.includes(username) || bug.metadata.access.comment_access.includes('PUBLIC');
+      
+      // Reporters are added to full_access on creation, but we check explicitly just in case they were removed but we still want some logic?
+      // Actually, the mandate says reporter doesn't have implicit access anymore.
+      
+      // Check component-level permissions
+      const apiResult = get_api();
+      if (apiResult.ok) {
+        const compRes = await apiResult.val.get_component_metadata(username, bug.metadata.component_id);
+        if (compRes.ok) {
+          const compMeta = compRes.val;
+          for (const group of Object.values(compMeta.access_control.groups)) {
+            const isMember = group.members.includes(username) || group.members.includes('PUBLIC');
+            if (isMember) {
+              if (group.permissions.includes('AdminIssues') || group.permissions.includes('EditIssues')) {
+                full = true;
+                comment = true;
+              }
+              if (group.permissions.includes('CommentOnIssues')) {
+                comment = true;
+              }
+            }
+          }
+        }
+      }
+
+      // Collaborators and CC always give at least View access (not handled here as they don't grant comment/full)
+      
+      setHasFullAccess(full);
+      setHasCommentAccess(comment);
+    };
+    checkAccess();
+  }, [bug, username]);
 
   // Handle scrolling to comment if hash is present
   useEffect(() => {
@@ -84,6 +130,18 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
     }
   };
 
+  const handleMetadataChange = async (field: string, value: string) => {
+    const apiResult = get_api();
+    if (!apiResult.ok) return;
+
+    const result = await apiResult.val.update_bug_metadata(username, bug.id, field, value);
+    if (result.ok) {
+      onRefresh(bug.id);
+    } else {
+      alert(`Failed to update ${field}: ` + result.val.message);
+    }
+  };
+
   const handleCommentSubmit = async () => {
     if (!commentText.trim()) return;
 
@@ -128,13 +186,6 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
     setIsSubmitting(false);
   };
 
-  const hasCommentAccess = 
-    bug.metadata.reporter === username ||
-    bug.metadata.access.full_access.includes(username) || 
-    bug.metadata.access.full_access.includes('PUBLIC') || 
-    bug.metadata.access.comment_access.includes(username) || 
-    bug.metadata.access.comment_access.includes('PUBLIC');
-
   return (
     <div className="bug-view">
       <div className="bug-header">
@@ -145,7 +196,17 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
         <div className="bug-title-row">
           <button onClick={onHome} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '20px' }}>←</button>
           <button onClick={() => onRefresh(bug.id)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '20px' }}>↻</button>
-          <span>{bug.title}</span>
+          {hasFullAccess ? (
+            <input 
+              type="text"
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              onBlur={() => editTitle !== bug.title && handleMetadataChange('title', editTitle)}
+              style={{ flexGrow: 1, background: 'transparent', border: '1px solid #333', color: 'white', fontSize: '20px', padding: '4px 8px' }}
+            />
+          ) : (
+            <span>{bug.title}</span>
+          )}
         </div>
       </div>
 
@@ -155,7 +216,16 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
             <div className="comment-header">
               <strong>{bug.metadata.reporter}</strong> created the issue · {formatTemporalDate(bug.metadata.created_at)}
             </div>
-            <div className="description-content" dangerouslySetInnerHTML={renderMarkdown(bug.metadata.description)} />
+            {hasFullAccess ? (
+              <textarea 
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                onBlur={() => editDescription !== bug.metadata.description && handleMetadataChange('description', editDescription)}
+                style={{ width: '100%', height: '200px', backgroundColor: '#0f0f0f', color: 'white', border: '1px solid #333', padding: '8px', fontFamily: 'inherit' }}
+              />
+            ) : (
+              <div className="description-content" dangerouslySetInnerHTML={renderMarkdown(bug.metadata.description)} />
+            )}
           </div>
 
           {bug.comments.map((comment) => (
@@ -218,38 +288,124 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
             <div className="metadata-label">Reporter</div>
             <div className="metadata-value">{bug.metadata.reporter}</div>
           </div>
+          
           <div className="metadata-item">
             <div className="metadata-label">Type</div>
-            <div className="metadata-value">{bug.metadata.type}</div>
+            {hasFullAccess ? (
+              <select value={bug.metadata.type} onChange={(e) => handleMetadataChange('type', e.target.value)} style={{ width: '100%', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}>
+                <option>Bug</option>
+                <option>Feature</option>
+                <option>Task</option>
+              </select>
+            ) : (
+              <div className="metadata-value">{bug.metadata.type}</div>
+            )}
           </div>
+
           <div className="metadata-item">
             <div className="metadata-label">Priority</div>
-            <div className="metadata-value">{bug.metadata.priority}</div>
+            {hasFullAccess ? (
+              <select value={bug.metadata.priority} onChange={(e) => handleMetadataChange('priority', e.target.value)} style={{ width: '100%', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}>
+                <option>P0</option>
+                <option>P1</option>
+                <option>P2</option>
+                <option>P3</option>
+                <option>P4</option>
+              </select>
+            ) : (
+              <div className="metadata-value">{bug.metadata.priority}</div>
+            )}
           </div>
+
           <div className="metadata-item">
             <div className="metadata-label">Severity</div>
-            <div className="metadata-value">{bug.metadata.severity}</div>
+            {hasFullAccess ? (
+              <select value={bug.metadata.severity} onChange={(e) => handleMetadataChange('severity', e.target.value)} style={{ width: '100%', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}>
+                <option>S0</option>
+                <option>S1</option>
+                <option>S2</option>
+                <option>S3</option>
+                <option>S4</option>
+              </select>
+            ) : (
+              <div className="metadata-value">{bug.metadata.severity}</div>
+            )}
           </div>
+
           <div className="metadata-item">
             <div className="metadata-label">Status</div>
-            <div className="metadata-value" style={{ backgroundColor: '#1e3a8a', padding: '2px 6px', borderRadius: '4px', display: 'inline-block' }}>{bug.metadata.status}</div>
+            {hasFullAccess ? (
+              <select value={bug.metadata.status} onChange={(e) => handleMetadataChange('status', e.target.value)} style={{ width: '100%', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}>
+                <option>New</option>
+                <option>Assigned</option>
+                <option>Fixed</option>
+                <option>Verified</option>
+                <option>Duplicate</option>
+                <option>WontFix</option>
+              </select>
+            ) : (
+              <div className="metadata-value" style={{ backgroundColor: '#1e3a8a', padding: '2px 6px', borderRadius: '4px', display: 'inline-block' }}>{bug.metadata.status}</div>
+            )}
           </div>
+
           <div className="metadata-item">
             <div className="metadata-label">Assignee</div>
-            <div className="metadata-value">{bug.metadata.assignee}</div>
+            {hasFullAccess ? (
+              <input 
+                type="text" 
+                defaultValue={bug.metadata.assignee} 
+                onBlur={(e) => e.target.value !== bug.metadata.assignee && handleMetadataChange('assignee', e.target.value)}
+                style={{ width: 'calc(100% - 10px)', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}
+              />
+            ) : (
+              <div className="metadata-value">{bug.metadata.assignee}</div>
+            )}
           </div>
+
           <div className="metadata-item">
             <div className="metadata-label">Verifier</div>
-            <div className="metadata-value">{bug.metadata.verifier || 'None'}</div>
+            {hasFullAccess ? (
+              <input 
+                type="text" 
+                defaultValue={bug.metadata.verifier} 
+                onBlur={(e) => e.target.value !== bug.metadata.verifier && handleMetadataChange('verifier', e.target.value)}
+                style={{ width: 'calc(100% - 10px)', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}
+              />
+            ) : (
+              <div className="metadata-value">{bug.metadata.verifier || 'None'}</div>
+            )}
           </div>
+
           <div className="metadata-item">
             <div className="metadata-label">Collaborators</div>
-            <div className="metadata-value">{bug.metadata.collaborators.join(', ') || 'None'}</div>
+            {hasFullAccess ? (
+              <input 
+                type="text" 
+                defaultValue={bug.metadata.collaborators.join(', ')} 
+                onBlur={(e) => e.target.value !== bug.metadata.collaborators.join(', ') && handleMetadataChange('collaborators', e.target.value)}
+                placeholder="user1, user2"
+                style={{ width: 'calc(100% - 10px)', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}
+              />
+            ) : (
+              <div className="metadata-value">{bug.metadata.collaborators.join(', ') || 'None'}</div>
+            )}
           </div>
+
           <div className="metadata-item">
             <div className="metadata-label">CC</div>
-            <div className="metadata-value">{bug.metadata.cc.join(', ') || 'None'}</div>
+            {hasFullAccess ? (
+              <input 
+                type="text" 
+                defaultValue={bug.metadata.cc.join(', ')} 
+                onBlur={(e) => e.target.value !== bug.metadata.cc.join(', ') && handleMetadataChange('cc', e.target.value)}
+                placeholder="user1, user2"
+                style={{ width: 'calc(100% - 10px)', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}
+              />
+            ) : (
+              <div className="metadata-value">{bug.metadata.cc.join(', ') || 'None'}</div>
+            )}
           </div>
+
           <div className="metadata-item">
             <div className="metadata-label">Access</div>
             <div className="metadata-value">
@@ -297,23 +453,50 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
                 
                 <div style={{ marginBottom: '20px' }}>
                   <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>Users who can edit, comment, and view</div>
-                  <div style={{ backgroundColor: '#2d2d2d', padding: '10px', borderRadius: '4px', minHeight: '30px', border: '1px solid #444' }}>
-                    {bug.metadata.access.full_access.join(', ') || 'None'}
-                  </div>
+                  {hasFullAccess ? (
+                    <input 
+                      type="text" 
+                      defaultValue={bug.metadata.access.full_access.join(', ')}
+                      onBlur={(e) => e.target.value !== bug.metadata.access.full_access.join(', ') && handleMetadataChange('full_access', e.target.value)}
+                      style={{ width: 'calc(100% - 20px)', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '10px', borderRadius: '4px' }}
+                    />
+                  ) : (
+                    <div style={{ backgroundColor: '#2d2d2d', padding: '10px', borderRadius: '4px', minHeight: '30px', border: '1px solid #444' }}>
+                      {bug.metadata.access.full_access.join(', ') || 'None'}
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ marginBottom: '20px' }}>
                   <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>Users who can comment, and view</div>
-                  <div style={{ backgroundColor: '#2d2d2d', padding: '10px', borderRadius: '4px', minHeight: '30px', border: '1px solid #444' }}>
-                    {bug.metadata.access.comment_access.join(', ') || 'None'}
-                  </div>
+                  {hasFullAccess ? (
+                    <input 
+                      type="text" 
+                      defaultValue={bug.metadata.access.comment_access.join(', ')}
+                      onBlur={(e) => e.target.value !== bug.metadata.access.comment_access.join(', ') && handleMetadataChange('comment_access', e.target.value)}
+                      style={{ width: 'calc(100% - 20px)', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '10px', borderRadius: '4px' }}
+                    />
+                  ) : (
+                    <div style={{ backgroundColor: '#2d2d2d', padding: '10px', borderRadius: '4px', minHeight: '30px', border: '1px solid #444' }}>
+                      {bug.metadata.access.comment_access.join(', ') || 'None'}
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ marginBottom: '20px' }}>
                   <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>Users who can view</div>
-                  <div style={{ backgroundColor: '#2d2d2d', padding: '10px', borderRadius: '4px', minHeight: '30px', border: '1px solid #444' }}>
-                    {bug.metadata.access.view_access.join(', ') || 'None'}
-                  </div>
+                  {hasFullAccess ? (
+                    <input 
+                      type="text" 
+                      defaultValue={bug.metadata.access.view_access.join(', ')}
+                      onBlur={(e) => e.target.value !== bug.metadata.access.view_access.join(', ') && handleMetadataChange('view_access', e.target.value)}
+                      style={{ width: 'calc(100% - 20px)', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '10px', borderRadius: '4px' }}
+                    />
+                  ) : (
+                    <div style={{ backgroundColor: '#2d2d2d', padding: '10px', borderRadius: '4px', minHeight: '30px', border: '1px solid #444' }}>
+                      {bug.metadata.access.view_access.join(', ') || 'None'}
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -334,7 +517,16 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
               {bug.metadata.user_metadata.map((entry, idx) => (
                 <div className="metadata-item" key={idx}>
                   <div className="metadata-label">{entry.key}</div>
-                  <div className="metadata-value">{entry.value}</div>
+                  {hasFullAccess ? (
+                    <input 
+                      type="text" 
+                      defaultValue={entry.value} 
+                      onBlur={(e) => e.target.value !== entry.value && handleMetadataChange(entry.key, e.target.value)}
+                      style={{ width: 'calc(100% - 10px)', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}
+                    />
+                  ) : (
+                    <div className="metadata-value">{entry.value}</div>
+                  )}
                 </div>
               ))}
             </>

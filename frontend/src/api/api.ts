@@ -210,7 +210,7 @@ export interface API {
   get_bug(username: string, id: number): Promise<Result<Bug, StatusError>>;
   get_bug_state(username: string, id: number): Promise<Result<BugStateResponse, StatusError>>;
   submit_comment(username: string, id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>>;
-  update_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>>;
+  update_bug_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>>;
   update_bug_access(username: string, id: number, mode: TemplateAccess): Promise<Result<ChangeMetadataResponse, StatusError>>;
   get_component_metadata(username: string, id: number): Promise<Result<ComponentMetadata, StatusError>>;
   update_component_metadata(username: string, id: number, metadata: ComponentMetadata): Promise<Result<void, StatusError>>;

@@ -412,7 +412,7 @@ async fn test_submit_comment() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn test_change_metadata() -> anyhow::Result<()> {
+async fn test_update_bug_metadata() -> anyhow::Result<()> {
     let dir = tempdir()?;
     create_test_bug(dir.path(), 100, 1, vec!["meta".to_string()])?;
     
@@ -443,7 +443,7 @@ async fn test_change_metadata() -> anyhow::Result<()> {
         u: "admin".to_string(),
     };
 
-    let response = change_metadata(State(state.clone()), Path(100), Json(req)).await.into_response();
+    let response = update_bug_metadata(State(state.clone()), Path(100), Json(req)).await.into_response();
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), 1024 * 1024).await?;
@@ -464,7 +464,7 @@ async fn test_change_metadata() -> anyhow::Result<()> {
         value: "Perception".to_string(),
         u: "admin".to_string(),
     };
-    let response = change_metadata(State(state.clone()), Path(100), Json(req_user)).await.into_response();
+    let response = update_bug_metadata(State(state.clone()), Path(100), Json(req_user)).await.into_response();
     assert_eq!(response.status(), StatusCode::OK);
 
     let data = fs::read(bug_path.join("metadata"))?;

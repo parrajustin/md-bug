@@ -306,36 +306,29 @@ impl BugMetadata {
             }
         }
 
-        let is_restricted = self.access.full_access.iter().any(|u| u != &self.reporter && u != "PUBLIC") || 
-                            self.access.comment_access.iter().any(|u| u != "PUBLIC") ||
-                            self.access.view_access.iter().any(|u| u != "PUBLIC");
-
         let mut max_level = UserAccessLevel::None;
-
-        if is_restricted {
-            // ONLY check bug-specific lists and collaborators/cc
-            if self.access.full_access.iter().any(|u| u == username || u == "PUBLIC") {
-                max_level = std::cmp::max(max_level, UserAccessLevel::Full);
-            }
-            if self.access.comment_access.iter().any(|u| u == username || u == "PUBLIC") {
-                max_level = std::cmp::max(max_level, UserAccessLevel::Comment);
-            }
-            if self.access.view_access.iter().any(|u| u == username || u == "PUBLIC") {
-                max_level = std::cmp::max(max_level, UserAccessLevel::View);
-            }
-        } else {
-            // INHERIT from component (non-sovereign permissions)
-            for group in resolved_meta.access_control.groups.values() {
-                if group.members.contains(&username.to_string()) || group.members.contains(&"PUBLIC".to_string()) {
-                    // EditIssues moved to sovereign section above
-                    if group.permissions.contains(&Permission::CommentOnIssues) {
-                        max_level = std::cmp::max(max_level, UserAccessLevel::Comment);
-                    }
-                    if group.permissions.contains(&Permission::ViewIssues) {
-                        max_level = std::cmp::max(max_level, UserAccessLevel::View);
-                    }
+        // INHERIT from component (non-sovereign permissions)
+        for group in resolved_meta.access_control.groups.values() {
+            if group.members.contains(&username.to_string()) || group.members.contains(&"PUBLIC".to_string()) {
+                // EditIssues moved to sovereign section above
+                if group.permissions.contains(&Permission::CommentOnIssues) {
+                    max_level = std::cmp::max(max_level, UserAccessLevel::Comment);
+                }
+                if group.permissions.contains(&Permission::ViewIssues) {
+                    max_level = std::cmp::max(max_level, UserAccessLevel::View);
                 }
             }
+        }
+
+        // Check bug specific access.
+        if self.access.full_access.iter().any(|u| u == username || u == "PUBLIC") {
+            max_level = std::cmp::max(max_level, UserAccessLevel::Full);
+        }
+        if self.access.comment_access.iter().any(|u| u == username || u == "PUBLIC") {
+            max_level = std::cmp::max(max_level, UserAccessLevel::Comment);
+        }
+        if self.access.view_access.iter().any(|u| u == username || u == "PUBLIC") {
+            max_level = std::cmp::max(max_level, UserAccessLevel::View);
         }
 
         // Collaborators and CC always give at least View access
@@ -1437,7 +1430,7 @@ pub struct ChangeMetadataResponse {
 /// 6. Increment `state_id`.
 /// 7. Persist updated metadata to disk.
 /// 8. Return the new `state_id`.
-pub async fn change_metadata(
+pub async fn update_bug_metadata(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
     Json(payload): Json<MetadataChangeRequest>,
