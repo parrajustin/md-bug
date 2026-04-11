@@ -20,8 +20,7 @@ export type Permission =
 export type TemplateAccess = 
   | 'Default'
   | 'LimitedComment'
-  | 'LimitedView'
-  | 'Private';
+  | 'LimitedView';
 
 export interface UserMetadataEntry {
   version: number;

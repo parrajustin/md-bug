@@ -145,7 +145,6 @@ pub enum TemplateAccess {
     Default,
     LimitedComment,
     LimitedView,
-    Private,
 }
 
 /// Represents a template for creating new bugs.
@@ -295,6 +294,8 @@ impl HasVersion for AccessMetadata {
 
 impl BugMetadata {
     pub fn access_level(&self, resolved_meta: &ComponentMetadata, username: &str) -> UserAccessLevel {
+        // 0. Reporter doesn't always have full access.
+
         // 1. Check sovereign admins first (ComponentAdmin or AdminIssues)
         for group in resolved_meta.access_control.groups.values() {
             if group.members.contains(&username.to_string()) || group.members.contains(&"PUBLIC".to_string()) {
@@ -305,9 +306,9 @@ impl BugMetadata {
             }
         }
 
-        let is_restricted = !self.access.full_access.is_empty() || 
-                            !self.access.comment_access.is_empty() || 
-                            !self.access.view_access.is_empty();
+        let is_restricted = self.access.full_access.iter().any(|u| u != &self.reporter && u != "PUBLIC") || 
+                            self.access.comment_access.iter().any(|u| u != "PUBLIC") ||
+                            self.access.view_access.iter().any(|u| u != "PUBLIC");
 
         let mut max_level = UserAccessLevel::None;
 
@@ -796,6 +797,8 @@ pub async fn create_bug(
 
     // 8. Apply template-based access control
     let mut access = AccessMetadata::default();
+    access.full_access.push(payload.u.clone());
+
     match template.default_access {
         TemplateAccess::Default => {},
         TemplateAccess::LimitedComment => {
@@ -804,9 +807,6 @@ pub async fn create_bug(
         TemplateAccess::LimitedView => {
             access.view_access.push("PUBLIC".to_string());
         },
-        TemplateAccess::Private => {
-            access.full_access.push(payload.u.clone());
-        }
     }
 
     let metadata = BugMetadata {
@@ -1547,9 +1547,6 @@ pub async fn update_bug_access(
         TemplateAccess::LimitedView => {
             access.view_access.push("PUBLIC".to_string());
         },
-        TemplateAccess::Private => {
-            access.full_access.push(payload.u.clone());
-        }
     }
     metadata.access = access;
     metadata.state_id += 1;

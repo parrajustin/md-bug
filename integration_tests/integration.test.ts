@@ -163,8 +163,9 @@ describe('Integration Test', () => {
     await api.update_component_metadata('admin', vulnId, vulnMeta);
 
     const randosList = (await api.get_component_list('randos')).unsafeUnwrap();
-    expect(randosList).toContain('all/opensource');
-    expect(randosList).not.toContain('all/opensource/securityvulnerabilities');
+    const paths = randosList.map(c => [...c.folders, c.name].join('/').toLowerCase());
+    expect(paths).toContain('all/opensource');
+    expect(paths).not.toContain('all/opensource/securityvulnerabilities');
 
     const createRes = await api.create_bug('randos', {
       component_id: vulnId,
@@ -215,7 +216,8 @@ describe('Integration Test', () => {
     await api.update_metadata('admin', bugId, 'full_access', 'Auditor');
 
     const auditorList = (await api.get_component_list('Auditor')).unsafeUnwrap();
-    expect(auditorList).not.toContain('all/privateproject');
+    const paths = auditorList.map(c => [...c.folders, c.name].join('/').toLowerCase());
+    expect(paths).not.toContain('all/privateproject');
 
     const auditorBug = (await api.get_bug('Auditor', bugId)).unsafeUnwrap();
     expect(auditorBug.metadata.title).toBe('AuditReport');
@@ -548,12 +550,7 @@ describe('Integration Test', () => {
     const viewRes1 = await api.get_bug('bad_user', bugId);
     expect(viewRes1.ok).toBe(true);
 
-    // Step 2: other removes all other access except themselves
-    await api.update_bug_access('other', bugId, 'Private');
-    const viewRes2 = await api.get_bug('bad_user', bugId);
-    expect(viewRes2.ok).toBe(false); // bad_user is locked out of Restricted bug
-
-    // Step 3: admin still has access (Sovereign)
+    // Step 2: admin still has access (Sovereign)
     const viewRes3 = await api.get_bug('admin', bugId);
     expect(viewRes3.ok).toBe(true);
   });
@@ -703,7 +700,8 @@ describe('Integration Test', () => {
     const bugId = (await api.create_bug('admin', { component_id: privId, template_name: '', title: 'Task', description: '', collaborators: [], cc: [] })).unsafeUnwrap();
 
     const helperListBefore = (await api.get_component_list('helper')).unsafeUnwrap();
-    expect(helperListBefore).not.toContain('all/privateh');
+    const paths = helperListBefore.map(c => [...c.folders, c.name].join('/').toLowerCase());
+    expect(paths).not.toContain('all/privateh');
 
     await api.update_metadata('admin', bugId, 'collaborators', 'helper');
 
@@ -712,5 +710,36 @@ describe('Integration Test', () => {
 
     const commentRes = await api.submit_comment('helper', bugId, 'helper', 'Can I help?');
     expect(commentRes.ok).toBe(false);
+  });
+
+  it('Scenario: Create bug should have user who created it as "full_access"', async () => {
+    /**
+     * Scenario "Create bug should have user who created it as \"full_access\""
+     * User admin creates component "Root"
+     * User Admin sets PUBLIC in component "Root" to be in "Issue Contributors"
+     * User "random" creates bug "TEST_BUG" in component "Root".
+     * Test the created bug "TEST_BUG" has the user "random" in the "full_access" access control section.
+     */
+    console.log('Running Create bug full_access scenario...');
+    const allId = await findComponentId('admin', 'all');
+    await api.create_component('admin', { name: 'Root', description: 'The Root', parent_id: allId });
+    const rootId = await findComponentId('admin', 'Root');
+
+    const rootMeta = (await api.get_component_metadata('admin', rootId)).unsafeUnwrap();
+    rootMeta.access_control.groups['Issue Contributors'].members.push('PUBLIC');
+    await api.update_component_metadata('admin', rootId, rootMeta);
+
+    const bugId = (await api.create_bug('random', {
+      component_id: rootId,
+      template_name: '',
+      title: 'TEST_BUG',
+      description: 'A test bug',
+      collaborators: [],
+      cc: []
+    })).unsafeUnwrap();
+
+    const bug = (await api.get_bug('admin', bugId)).unsafeUnwrap();
+    expect(bug.metadata.reporter).toBe('random');
+    expect(bug.metadata.access.full_access).toContain('random');
   });
 });
