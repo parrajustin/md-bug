@@ -51,3 +51,7 @@ This document captures the architectural decisions, conventions, and "tribal kno
 - **Stable Scrolling:** When linking to specific comments, the frontend uses a retry loop with `requestAnimationFrame` to ensure the DOM is rendered before attempting to `scrollIntoView`.
 - **Sanitization:** Component names provided via API are sanitized to lowercase alphanumeric strings with underscores. If a collision occurs on disk (even if the display names differ), a numeric suffix is appended.
 - **Group Inheritance:** When creating a sub-component, all `access_control.groups` from the parent are cloned. The creator is then explicitly added to the "Component Admins" group of the new child.
+
+## Verification
+- **Unit Tests:** Always run `cargo test` within the `backend/` directory to verify core logic, ID management, and API handler integrity. This is a foundational mandate for every backend change.
+- **Integration Tests:** After verifying with unit tests, run `npm test` in the `integration_tests/` directory to ensure full-stack compatibility.

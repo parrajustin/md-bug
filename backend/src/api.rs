@@ -1497,60 +1497,6 @@ pub async fn update_bug_metadata(
     }))
 }
 
-/// Request payload for updating bug access.
-#[derive(SerdeDeserialize)]
-pub struct UpdateBugAccessRequest {
-    pub u: String,
-    pub mode: TemplateAccess,
-}
-
-/// Updates the access control for a specific bug.
-pub async fn update_bug_access(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<u32>,
-    Json(payload): Json<UpdateBugAccessRequest>,
-) -> Result<impl IntoResponse, StatusCode> {
-    let lock = state.get_bug_lock(id);
-    let _guard = lock.lock().await;
-    let bug_path = find_bug_path(&state, id).ok_or(StatusCode::NOT_FOUND)?;
-
-    let metadata_file = bug_path.join("metadata");
-    let data = fs::read(&metadata_file).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut metadata: BugMetadata = read_versioned::<BugMetadata>(&data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let resolved_meta = {
-        let component_cache = state.component_cache.lock().unwrap();
-        let path = component_cache.get_path(metadata.component_id).unwrap_or_default();
-        resolve_component_metadata(&state.root, &path)
-    };
-
-    if metadata.access_level(&resolved_meta, &payload.u) < UserAccessLevel::Full {
-        return Err(StatusCode::FORBIDDEN);
-    }
-
-    // Apply access mode
-    let mut access = AccessMetadata::default();
-    match payload.mode {
-        TemplateAccess::Default => {},
-        TemplateAccess::LimitedComment => {
-            access.comment_access.push("PUBLIC".to_string());
-        },
-        TemplateAccess::LimitedView => {
-            access.view_access.push("PUBLIC".to_string());
-        },
-    }
-    metadata.access = access;
-    metadata.state_id += 1;
-    let new_state_id = metadata.state_id;
-
-    let bytes = rkyv::to_bytes::<_, 1024>(&metadata).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    fs::write(&metadata_file, bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok(Json(ChangeMetadataResponse {
-        state_id: new_state_id,
-    }))
-}
-
 /// Helper function to locate the directory path of a bug given its ID using the cache.
 pub fn find_bug_path(state: &AppState, id: u32) -> Option<PathBuf> {
     state.bug_cache.get_path(&state.root, id as u64)

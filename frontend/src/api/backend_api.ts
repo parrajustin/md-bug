@@ -81,21 +81,6 @@ export class BackendApi implements API {
     );
   }
 
-  async update_bug_access(username: string, id: number, mode: TemplateAccess): Promise<Result<ChangeMetadataResponse, StatusError>> {
-    return WrapPromise(
-      fetch(`${this.baseUrl}/api/bug/${id}/update_access`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ u: username, mode }, bigIntReplacer)
-      }).then(async resp => {
-        if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
-        const text = await resp.text();
-        return JSON.parse(text, bigIntReviver) as ChangeMetadataResponse;
-      }),
-      'Failed to update bug access'
-    );
-  }
-
   async get_component_metadata(username: string, id: number): Promise<Result<ComponentMetadata, StatusError>> {
     const url = new URL(`${this.baseUrl}/api/component/${id}/get_metadata`);
     url.searchParams.append('u', username);

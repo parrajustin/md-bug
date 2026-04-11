@@ -111,25 +111,6 @@ export class FakeApi implements API {
     });
   }
 
-  async update_bug_access(username: string, id: number, mode: TemplateAccess): Promise<Result<ChangeMetadataResponse, StatusError>> {
-    const bug = this.mockBugs.find(b => b.id === id);
-    if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
-    bug.metadata.state_id = (bug.metadata.state_id || 1n) + 1n;
-    bug.state_id = bug.metadata.state_id;
-    // Mocking access update
-    if (mode === 'LimitedComment') {
-      bug.metadata.access.comment_access = ['PUBLIC'];
-    } else if (mode === 'LimitedView') {
-      bug.metadata.access.view_access = ['PUBLIC'];
-    } else {
-      bug.metadata.access.comment_access = [];
-      bug.metadata.access.view_access = [];
-    }
-    return Ok({
-      state_id: bug.metadata.state_id
-    });
-  }
-
   async get_component_metadata(username: string, id: number): Promise<Result<ComponentMetadata, StatusError>> {
     return Ok({
       version: 1,

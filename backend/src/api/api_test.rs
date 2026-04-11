@@ -548,7 +548,6 @@ async fn test_create_bug_with_template_access() -> anyhow::Result<()> {
         verifier: None,
         collaborators: vec![],
         cc: vec![],
-        created_at: None,
     };
 
     let res = create_bug(State(state.clone()), Json(req)).await.into_response();

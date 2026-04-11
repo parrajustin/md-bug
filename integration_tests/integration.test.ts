@@ -289,8 +289,8 @@ describe('Integration Test', () => {
       cc: []
     })).unsafeUnwrap();
 
-    // Use the new update_bug_access
-    await api.update_bug_access('admin', bugId, 'LimitedComment');
+    // Grant PUBLIC comment access
+    await api.update_bug_metadata('admin', bugId, 'comment_access', 'PUBLIC');
 
     // testUser should have View access because they have Comment access (Tiered Model)
     const viewRes = await api.get_bug('testUser', bugId);
@@ -545,8 +545,7 @@ describe('Integration Test', () => {
       component_id: mainId, template_name: '', title: 'TEST', description: 'TEST', collaborators: [], cc: []
     })).unsafeUnwrap();
 
-    // Step 1: Default mode (inherited)
-    await api.update_bug_access('other', bugId, 'Default');
+    // Step 1: Default mode (inherited) - nothing to do, bug access lists are empty by default (except reporter)
     const viewRes1 = await api.get_bug('bad_user', bugId);
     expect(viewRes1.ok).toBe(true);
 
