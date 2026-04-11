@@ -1,5 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { 
+  Box, 
+  Typography, 
+  Paper, 
+  TextField, 
+  Button, 
+  Stack, 
+  Select, 
+  MenuItem, 
+  FormControl, 
+  InputLabel, 
+  Divider,
+  CircularProgress,
+  Grid
+} from '@mui/material';
 import { get_api, type ComponentSummary, type CreateBugRequest } from './api/api';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -90,166 +105,187 @@ const CreateIssueView: React.FC<CreateIssueViewProps> = ({ username }) => {
     return c.folders.join(' > ') + ' > ' + c.name;
   };
 
-  if (loading) return <div className="loading-view" style={{ padding: '20px', color: 'white' }}>Loading components...</div>;
-  if (error) return <div className="error-view" style={{ padding: '20px', color: '#ff4d4d' }}>Error: {error}</div>;
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Box sx={{ p: 4 }}>
+        <Typography variant="h5" color="error" gutterBottom>Error Loading Components</Typography>
+        <Typography color="text.secondary">{error}</Typography>
+      </Box>
+    );
+  }
 
   return (
-    <div className="create-issue-view" style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', padding: '20px' }}>
-      <div className="main-col" style={{ flex: '1 1 60%', minWidth: '300px' }}>
-        <h1 style={{ color: 'white', marginTop: 0, marginBottom: '24px' }}>Create New Issue</h1>
-        
-        <div className="form-group" style={{ marginBottom: '20px' }}>
-          <label style={{ display: 'block', color: '#888', marginBottom: '8px', fontSize: '14px', fontWeight: 500 }}>Title</label>
-          <input 
-            type="text" 
-            value={title} 
-            onChange={(e) => setTitle(e.target.value)}
-            style={{ width: '100%', boxSizing: 'border-box', padding: '12px', backgroundColor: '#1e1e1e', border: '1px solid #333', color: 'white', borderRadius: '4px' }}
-            placeholder="What's the issue?"
-          />
-        </div>
+    <Box sx={{ width: '100%' }}>
+      <Typography variant="h4" sx={{ mb: 4, fontWeight: 500 }}>Create New Issue</Typography>
+      
+      <Box sx={{ display: 'flex', gap: 3, flexDirection: { xs: 'column', md: 'row' } }}>
+        {/* Main Form Column */}
+        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+          <Stack spacing={3}>
+            <Paper variant="outlined" sx={{ p: 3 }}>
+              <Stack spacing={3}>
+                <TextField
+                  fullWidth
+                  label="Title"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="What's the issue?"
+                  required
+                />
 
-        <div className="form-group" style={{ marginBottom: '20px' }}>
-          <label style={{ display: 'block', color: '#888', marginBottom: '8px', fontSize: '14px', fontWeight: 500 }}>Description (Markdown)</label>
-          <textarea 
-            value={description} 
-            onChange={(e) => setDescription(e.target.value)}
-            style={{ width: '100%', boxSizing: 'border-box', height: '300px', padding: '12px', backgroundColor: '#1e1e1e', border: '1px solid #333', color: 'white', borderRadius: '4px', resize: 'vertical', fontFamily: 'inherit' }}
-            placeholder="Describe the issue in detail..."
-          />
-        </div>
+                <TextField
+                  fullWidth
+                  multiline
+                  minRows={10}
+                  label="Description (Markdown)"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Describe the issue in detail..."
+                  sx={{ '& .MuiInputBase-root': { fontFamily: 'monospace' } }}
+                />
+              </Stack>
+            </Paper>
 
-        <div className="preview-section" style={{ marginBottom: '24px' }}>
-          <h3 style={{ color: '#888', fontSize: '14px', marginBottom: '12px', fontWeight: 500 }}>Preview</h3>
-          <div 
-            className="comment-card" 
-            style={{ minHeight: '100px', backgroundColor: '#0f0f0f', border: '1px solid #333', borderRadius: '8px', padding: '16px' }}
-            dangerouslySetInnerHTML={renderMarkdown(description || '*No description provided*')} 
-          />
-        </div>
+            <Paper variant="outlined" sx={{ p: 3, bgcolor: 'rgba(0,0,0,0.1)' }}>
+              <Typography variant="subtitle2" color="text.secondary" gutterBottom>Preview</Typography>
+              <Box 
+                sx={{ minHeight: 100 }}
+                dangerouslySetInnerHTML={renderMarkdown(description || '*No description provided*')} 
+              />
+            </Paper>
 
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <button 
-            className="primary-btn" 
-            onClick={handleSubmit} 
-            disabled={isSubmitting}
-            style={{ padding: '12px 32px', fontSize: '16px' }}
-          >
-            {isSubmitting ? 'Creating...' : 'Create Issue'}
-          </button>
-          <button 
-            className="secondary-btn" 
-            onClick={() => navigate('/')}
-            style={{ padding: '12px 32px', fontSize: '16px', backgroundColor: 'transparent', border: '1px solid #444', color: '#ccc', borderRadius: '4px', cursor: 'pointer' }}
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <Button 
+                variant="contained" 
+                size="large"
+                onClick={handleSubmit} 
+                disabled={isSubmitting}
+                sx={{ px: 4, borderRadius: '24px' }}
+              >
+                {isSubmitting ? 'Creating...' : 'Create Issue'}
+              </Button>
+              <Button 
+                variant="outlined" 
+                size="large"
+                onClick={() => navigate('/')}
+                sx={{ px: 4, borderRadius: '24px' }}
+              >
+                Cancel
+              </Button>
+            </Box>
+          </Stack>
+        </Box>
 
-      <div className="meta-col" style={{ flex: '0 0 350px', backgroundColor: '#1a1a1a', padding: '20px', borderRadius: '8px', border: '1px solid #333', alignSelf: 'flex-start' }}>
-        <h3 style={{ color: 'white', marginTop: 0, marginBottom: '20px', fontSize: '18px' }}>Metadata</h3>
-        
-        <div className="form-group" style={{ marginBottom: '16px' }}>
-          <label className="metadata-label">Component</label>
-          <select 
-            value={componentId} 
-            onChange={(e) => setComponentId(Number(e.target.value))}
-            style={{ width: '100%', padding: '8px', backgroundColor: '#2d2d2d', border: '1px solid #444', color: 'white', borderRadius: '4px', outline: 'none' }}
-          >
-            {components.map(c => <option key={c.id} value={c.id}>{formatComponentPath(c)}</option>)}
-          </select>
-        </div>
+        {/* Sidebar Metadata Column */}
+        <Box sx={{ width: { xs: '100%', md: 350 }, flexShrink: 0 }}>
+          <Paper variant="outlined" sx={{ p: 3, position: 'sticky', top: 88 }}>
+            <Typography variant="h6" gutterBottom>Metadata</Typography>
+            <Divider sx={{ mb: 3 }} />
+            
+            <Stack spacing={3}>
+              <FormControl fullWidth size="small" required>
+                <InputLabel>Component</InputLabel>
+                <Select
+                  value={componentId}
+                  label="Component"
+                  onChange={(e) => setComponentId(Number(e.target.value))}
+                >
+                  {components.map(c => (
+                    <MenuItem key={c.id} value={c.id}>
+                      <Typography variant="body2" noWrap>{formatComponentPath(c)}</Typography>
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
 
-        <div className="form-group" style={{ marginBottom: '16px' }}>
-          <label className="metadata-label">Type</label>
-          <select 
-            value={type} 
-            onChange={(e) => setType(e.target.value)}
-            style={{ width: '100%', padding: '8px', backgroundColor: '#2d2d2d', border: '1px solid #444', color: 'white', borderRadius: '4px', outline: 'none' }}
-          >
-            <option>Bug</option>
-            <option>Feature</option>
-            <option>Task</option>
-          </select>
-        </div>
+              <FormControl fullWidth size="small">
+                <InputLabel>Type</InputLabel>
+                <Select
+                  value={type}
+                  label="Type"
+                  onChange={(e) => setType(e.target.value)}
+                >
+                  <MenuItem value="Bug">Bug</MenuItem>
+                  <MenuItem value="Feature">Feature</MenuItem>
+                  <MenuItem value="Task">Task</MenuItem>
+                </Select>
+              </FormControl>
 
-        <div className="form-group" style={{ marginBottom: '16px', display: 'flex', gap: '12px' }}>
-          <div style={{ flex: 1 }}>
-            <label className="metadata-label">Priority</label>
-            <select 
-              value={priority} 
-              onChange={(e) => setPriority(e.target.value)}
-              style={{ width: '100%', padding: '8px', backgroundColor: '#2d2d2d', border: '1px solid #444', color: 'white', borderRadius: '4px', outline: 'none' }}
-            >
-              <option>P0</option>
-              <option>P1</option>
-              <option>P2</option>
-              <option>P3</option>
-              <option>P4</option>
-            </select>
-          </div>
-          <div style={{ flex: 1 }}>
-            <label className="metadata-label">Severity</label>
-            <select 
-              value={severity} 
-              onChange={(e) => setSeverity(e.target.value)}
-              style={{ width: '100%', padding: '8px', backgroundColor: '#2d2d2d', border: '1px solid #444', color: 'white', borderRadius: '4px', outline: 'none' }}
-            >
-              <option>S0</option>
-              <option>S1</option>
-              <option>S2</option>
-              <option>S3</option>
-              <option>S4</option>
-            </select>
-          </div>
-        </div>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Priority</InputLabel>
+                    <Select
+                      value={priority}
+                      label="Priority"
+                      onChange={(e) => setPriority(e.target.value)}
+                    >
+                      {['P0', 'P1', 'P2', 'P3', 'P4'].map(p => <MenuItem key={p} value={p}>{p}</MenuItem>)}
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={6}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Severity</InputLabel>
+                    <Select
+                      value={severity}
+                      label="Severity"
+                      onChange={(e) => setSeverity(e.target.value)}
+                    >
+                      {['S0', 'S1', 'S2', 'S3', 'S4'].map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+                    </Select>
+                  </FormControl>
+                </Grid>
+              </Grid>
 
-        <div className="form-group" style={{ marginBottom: '16px' }}>
-          <label className="metadata-label">Assignee</label>
-          <input 
-            type="text" 
-            value={assignee} 
-            onChange={(e) => setAssignee(e.target.value)}
-            style={{ width: '100%', boxSizing: 'border-box', padding: '8px', backgroundColor: '#2d2d2d', border: '1px solid #444', color: 'white', borderRadius: '4px', outline: 'none' }}
-            placeholder="Username"
-          />
-        </div>
+              <TextField
+                fullWidth
+                size="small"
+                label="Assignee"
+                value={assignee}
+                onChange={(e) => setAssignee(e.target.value)}
+                placeholder="Username"
+              />
 
-        <div className="form-group" style={{ marginBottom: '16px' }}>
-          <label className="metadata-label">Verifier</label>
-          <input 
-            type="text" 
-            value={verifier} 
-            onChange={(e) => setVerifier(e.target.value)}
-            style={{ width: '100%', boxSizing: 'border-box', padding: '8px', backgroundColor: '#2d2d2d', border: '1px solid #444', color: 'white', borderRadius: '4px', outline: 'none' }}
-            placeholder="Username"
-          />
-        </div>
+              <TextField
+                fullWidth
+                size="small"
+                label="Verifier"
+                value={verifier}
+                onChange={(e) => setVerifier(e.target.value)}
+                placeholder="Username"
+              />
 
-        <div className="form-group" style={{ marginBottom: '16px' }}>
-          <label className="metadata-label">Collaborators</label>
-          <input 
-            type="text" 
-            value={collaborators} 
-            onChange={(e) => setCollaborators(e.target.value)}
-            style={{ width: '100%', boxSizing: 'border-box', padding: '8px', backgroundColor: '#2d2d2d', border: '1px solid #444', color: 'white', borderRadius: '4px', outline: 'none' }}
-            placeholder="user1, user2"
-          />
-        </div>
+              <TextField
+                fullWidth
+                size="small"
+                label="Collaborators"
+                value={collaborators}
+                onChange={(e) => setCollaborators(e.target.value)}
+                placeholder="user1, user2"
+              />
 
-        <div className="form-group" style={{ marginBottom: '16px' }}>
-          <label className="metadata-label">CC</label>
-          <input 
-            type="text" 
-            value={cc} 
-            onChange={(e) => setCc(e.target.value)}
-            style={{ width: '100%', boxSizing: 'border-box', padding: '8px', backgroundColor: '#2d2d2d', border: '1px solid #444', color: 'white', borderRadius: '4px', outline: 'none' }}
-            placeholder="user1, user2"
-          />
-        </div>
-      </div>
-    </div>
+              <TextField
+                fullWidth
+                size="small"
+                label="CC"
+                value={cc}
+                onChange={(e) => setCc(e.target.value)}
+                placeholder="user1, user2"
+              />
+            </Stack>
+          </Paper>
+        </Box>
+      </Box>
+    </Box>
   );
 };
 

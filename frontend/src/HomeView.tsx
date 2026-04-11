@@ -1,4 +1,28 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { 
+  Card, 
+  CardHeader, 
+  CardContent, 
+  Typography, 
+  Box, 
+  IconButton, 
+  Menu, 
+  MenuItem, 
+  FormControlLabel, 
+  Checkbox,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TableSortLabel,
+  Paper,
+  CircularProgress,
+  Tooltip
+} from '@mui/material';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { get_api, type BugSummary, type ComponentSummary } from './api/api';
 
 interface HomeViewProps {
@@ -43,8 +67,9 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username }) => {
     created_at: false,
     last_updated_at: true
   });
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  
+  const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
+  const [subMenuAnchorEl, setSubMenuAnchorEl] = useState<null | HTMLElement>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -72,16 +97,6 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username }) => {
 
     fetchData();
   }, [username]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   const sortedBugs = useMemo(() => {
     const sortableBugs = [...bugs];
@@ -122,159 +137,175 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username }) => {
     return new Date(ms).toLocaleString();
   };
 
-  const getSortIcon = (key: SortKey) => {
-    if (sortConfig.key !== key) return <span className="sort-icon">↕</span>;
-    return sortConfig.direction === 'asc' ? 
-      <span className="sort-icon active">↑</span> : 
-      <span className="sort-icon active">↓</span>;
+  const handleMenuClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    setMenuAnchorEl(event.currentTarget);
+  };
+
+  const handleMenuClose = () => {
+    setMenuAnchorEl(null);
+    setSubMenuAnchorEl(null);
+  };
+
+  const handleShowSubMenu = (event: React.MouseEvent<HTMLElement>) => {
+    setSubMenuAnchorEl(event.currentTarget);
   };
 
   if (loading) {
     return (
-      <div className="loading-view" style={{ padding: '20px', color: 'white' }}>
-        Loading...
-      </div>
+      <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+        <CircularProgress />
+      </Box>
     );
   }
 
   if (error) {
     return (
-      <div className="error-view" style={{ padding: '20px', color: '#ff4d4d' }}>
-        <h2>Error Loading Data</h2>
-        <p>{error}</p>
-      </div>
+      <Box sx={{ p: 4 }}>
+        <Typography variant="h5" color="error" gutterBottom>Error Loading Data</Typography>
+        <Typography color="text.secondary">{error}</Typography>
+      </Box>
     );
   }
 
-  return (
-    <div className="home-view" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <div className="card">
-        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2>All Bugs</h2>
-          <div className="dropdown" ref={menuRef}>
-            <button className="dropdown-toggle" onClick={() => setIsMenuOpen(!isMenuOpen)}>
-              ⋮
-            </button>
-            {isMenuOpen && (
-              <div className="dropdown-menu">
-                <div className="submenu-container">
-                  <div className="dropdown-item">
-                    Show <span>▶</span>
-                  </div>
-                  <div className="submenu">
-                    {(Object.keys(visibleColumns) as Array<keyof VisibleColumns>).map(col => (
-                      <div key={col} className="check-item" onClick={() => toggleColumn(col)}>
-                        <input 
-                          type="checkbox" 
-                          checked={visibleColumns[col]} 
-                          onChange={() => {}} 
-                          onClick={(e) => e.stopPropagation()} 
-                        />
-                        <span style={{ textTransform: 'capitalize' }}>
-                          {col.replace(/_/g, ' ')}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="bug-list" style={{ maxHeight: '500px', overflowY: 'auto' }}>
-          <div className="bug-list-header">
-            {visibleColumns.id && (
-              <div className="bug-id-col sortable-header" onClick={() => requestSort('id')}>
-                ID {getSortIcon('id')}
-              </div>
-            )}
-            {visibleColumns.title && (
-              <div className="bug-title-col sortable-header" onClick={() => requestSort('title')}>
-                Title {getSortIcon('title')}
-              </div>
-            )}
-            {visibleColumns.status && (
-              <div className="col-small sortable-header" onClick={() => requestSort('status')}>
-                Status {getSortIcon('status')}
-              </div>
-            )}
-            {visibleColumns.priority && (
-              <div className="col-tiny sortable-header" onClick={() => requestSort('priority')}>
-                Pri {getSortIcon('priority')}
-              </div>
-            )}
-            {visibleColumns.severity && (
-              <div className="col-tiny sortable-header" onClick={() => requestSort('severity')}>
-                Sev {getSortIcon('severity')}
-              </div>
-            )}
-            {visibleColumns.type && (
-              <div className="col-small sortable-header" onClick={() => requestSort('type')}>
-                Type {getSortIcon('type')}
-              </div>
-            )}
-            {visibleColumns.description && (
-              <div className="bug-title-col sortable-header" onClick={() => requestSort('description')}>
-                Description {getSortIcon('description')}
-              </div>
-            )}
-            {visibleColumns.created_at && (
-              <div className="col-timestamp sortable-header" onClick={() => requestSort('created_at')}>
-                Created {getSortIcon('created_at')}
-              </div>
-            )}
-            {visibleColumns.last_updated_at && (
-              <div className="col-timestamp sortable-header" onClick={() => requestSort('last_updated_at')}>
-                Updated {getSortIcon('last_updated_at')}
-              </div>
-            )}
-          </div>
-          {sortedBugs.map((bug) => (
-            <div 
-              key={bug.id} 
-              className="bug-list-row" 
-              onClick={() => onBugSelect(bug.id)}
-            >
-              {visibleColumns.id && <div className="bug-id-col">{bug.id}</div>}
-              {visibleColumns.title && <div className="bug-title-col">{bug.title}</div>}
-              {visibleColumns.status && <div className="col-small">{bug.status}</div>}
-              {visibleColumns.priority && <div className="col-tiny">{bug.priority}</div>}
-              {visibleColumns.severity && <div className="col-tiny">{bug.severity}</div>}
-              {visibleColumns.type && <div className="col-small">{bug.type}</div>}
-              {visibleColumns.description && <div className="bug-title-col col-description">{bug.description}</div>}
-              {visibleColumns.created_at && <div className="col-timestamp">{formatTimestamp(bug.created_at)}</div>}
-              {visibleColumns.last_updated_at && <div className="col-timestamp">{formatTimestamp(bug.last_updated_at)}</div>}
-            </div>
-          ))}
-        </div>
-      </div>
+  const columns: Array<{ id: keyof VisibleColumns; label: string }> = [
+    { id: 'id', label: 'ID' },
+    { id: 'title', label: 'Title' },
+    { id: 'status', label: 'Status' },
+    { id: 'priority', label: 'Priority' },
+    { id: 'severity', label: 'Severity' },
+    { id: 'type', label: 'Type' },
+    { id: 'description', label: 'Description' },
+    { id: 'created_at', label: 'Created' },
+    { id: 'last_updated_at', label: 'Updated' },
+  ];
 
-      <div className="card">
-        <div className="card-header">
-          <h2>Components</h2>
-        </div>
-        <div className="component-list" style={{ padding: '10px' }}>
-          {components.length === 0 && <div style={{ color: '#888' }}>No components found.</div>}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <Card>
+        <CardHeader 
+          title="All Bugs"
+          action={
+            <Box>
+              <IconButton onClick={handleMenuClick}>
+                <MoreVertIcon />
+              </IconButton>
+              <Menu
+                anchorEl={menuAnchorEl}
+                open={Boolean(menuAnchorEl)}
+                onClose={handleMenuClose}
+              >
+                <MenuItem onClick={handleShowSubMenu}>
+                  Show <ChevronRightIcon sx={{ ml: 'auto' }} />
+                </MenuItem>
+              </Menu>
+              <Menu
+                anchorEl={subMenuAnchorEl}
+                open={Boolean(subMenuAnchorEl)}
+                onClose={() => setSubMenuAnchorEl(null)}
+                anchorOrigin={{ vertical: 'top', horizontal: 'left' }}
+                transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+              >
+                {columns.map((col) => (
+                  <MenuItem key={col.id} onClick={() => toggleColumn(col.id)} sx={{ py: 0 }}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox 
+                          checked={visibleColumns[col.id]} 
+                          size="small"
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => toggleColumn(col.id)}
+                        />
+                      }
+                      label={col.label}
+                      sx={{ m: 0, '& .MuiFormControlLabel-label': { fontSize: '0.85rem' } }}
+                    />
+                  </MenuItem>
+                ))}
+              </Menu>
+            </Box>
+          }
+        />
+        <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
+          <TableContainer sx={{ maxHeight: 600 }}>
+            <Table stickyHeader size="small">
+              <TableHead>
+                <TableRow>
+                  {columns.filter(c => visibleColumns[c.id]).map((col) => (
+                    <TableCell 
+                      key={col.id}
+                      sortDirection={sortConfig.key === col.id ? sortConfig.direction : false}
+                      sx={{ fontWeight: 'bold', bgcolor: '#262626' }}
+                    >
+                      <TableSortLabel
+                        active={sortConfig.key === col.id}
+                        direction={sortConfig.key === col.id ? sortConfig.direction : 'asc'}
+                        onClick={() => requestSort(col.id as SortKey)}
+                      >
+                        {col.label}
+                      </TableSortLabel>
+                    </TableCell>
+                  ))}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {sortedBugs.map((bug) => (
+                  <TableRow 
+                    key={bug.id} 
+                    hover 
+                    onClick={() => onBugSelect(bug.id)}
+                    sx={{ cursor: 'pointer', '&:last-child td, &:last-child th': { border: 0 } }}
+                  >
+                    {visibleColumns.id && <TableCell sx={{ color: 'primary.main', fontFamily: 'monospace' }}>{bug.id}</TableCell>}
+                    {visibleColumns.title && <TableCell>{bug.title}</TableCell>}
+                    {visibleColumns.status && <TableCell>{bug.status}</TableCell>}
+                    {visibleColumns.priority && <TableCell>{bug.priority}</TableCell>}
+                    {visibleColumns.severity && <TableCell>{bug.severity}</TableCell>}
+                    {visibleColumns.type && <TableCell>{bug.type}</TableCell>}
+                    {visibleColumns.description && (
+                      <TableCell sx={{ 
+                        maxWidth: 300, 
+                        whiteSpace: 'nowrap', 
+                        overflow: 'hidden', 
+                        textOverflow: 'ellipsis' 
+                      }}>
+                        {bug.description}
+                      </TableCell>
+                    )}
+                    {visibleColumns.created_at && <TableCell sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{formatTimestamp(bug.created_at)}</TableCell>}
+                    {visibleColumns.last_updated_at && <TableCell sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{formatTimestamp(bug.last_updated_at)}</TableCell>}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader title="Components" />
+        <CardContent>
+          {components.length === 0 && <Typography color="text.secondary">No components found.</Typography>}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {components.map((comp) => (
-              <div 
+              <Paper 
                 key={comp.id} 
-                style={{ 
-                  padding: '8px 12px', 
-                  backgroundColor: '#1e1e1e', 
-                  borderRadius: '4px', 
-                  border: '1px solid #333',
-                  color: '#ccc',
-                  cursor: 'default'
+                variant="outlined"
+                sx={{ 
+                  p: 1.5, 
+                  bgcolor: '#1e1e1e',
+                  borderColor: 'divider',
+                  '&:hover': { bgcolor: '#252525' }
                 }}
               >
-                {formatComponentPath(comp)}
-              </div>
+                <Typography variant="body2" color="text.secondary">
+                  {formatComponentPath(comp)}
+                </Typography>
+              </Paper>
             ))}
-          </div>
-        </div>
-      </div>
-    </div>
+          </Box>
+        </CardContent>
+      </Card>
+    </Box>
   );
 };
 

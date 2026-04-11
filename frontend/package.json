@@ -11,6 +11,10 @@
     "serve": "npx serve public"
   },
   "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^9.0.0",
+    "@mui/material": "^9.0.0",
     "@types/react-router-dom": "5.3.3",
     "dompurify": "3.0.8",
     "jsdom": "29.0.1",

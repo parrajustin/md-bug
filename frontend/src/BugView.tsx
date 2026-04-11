@@ -1,4 +1,31 @@
 import React, { useState, useEffect } from 'react';
+import { 
+  Box, 
+  Typography, 
+  Breadcrumbs, 
+  Link, 
+  Paper, 
+  Grid, 
+  TextField, 
+  Button, 
+  Select, 
+  MenuItem, 
+  Divider, 
+  Chip, 
+  Dialog, 
+  DialogTitle, 
+  DialogContent, 
+  DialogActions,
+  IconButton,
+  Tooltip,
+  Stack,
+  FormControl,
+  InputLabel
+} from '@mui/material';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import CloseIcon from '@mui/icons-material/Close';
+import EditIcon from '@mui/icons-material/Edit';
 import { type Bug, type Comment, get_api } from './api/api';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -22,6 +49,7 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
   const [showAccessModal, setShowAccessModal] = useState(false);
   const [hasFullAccess, setHasFullAccess] = useState(false);
   const [hasCommentAccess, setHasCommentAccess] = useState(false);
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
 
   const [editTitle, setEditTitle] = useState(initialBug.title);
   const [editDescription, setEditDescription] = useState(initialBug.metadata.description);
@@ -47,9 +75,6 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
       let full = bug.metadata.access.full_access.includes(username) || bug.metadata.access.full_access.includes('PUBLIC');
       let comment = full || bug.metadata.access.comment_access.includes(username) || bug.metadata.access.comment_access.includes('PUBLIC');
       
-      // Reporters are added to full_access on creation, but we check explicitly just in case they were removed but we still want some logic?
-      // Actually, the mandate says reporter doesn't have implicit access anymore.
-      
       // Check component-level permissions
       const apiResult = get_api();
       if (apiResult.ok) {
@@ -70,8 +95,6 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
           }
         }
       }
-
-      // Collaborators and CC always give at least View access (not handled here as they don't grant comment/full)
       
       setHasFullAccess(full);
       setHasCommentAccess(comment);
@@ -109,7 +132,6 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
     const result = WrapToResult(
       () => {
         const instant = Temporal.Instant.fromEpochNanoseconds(nanos);
-        // Use Intl.DateTimeFormat for custom formatting
         return new Intl.DateTimeFormat('en-US', {
           month: 'short',
           day: 'numeric',
@@ -155,7 +177,6 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
       const response = result.val;
       
       if (response.state_id === bug.state_id + 1n) {
-        // State is exactly +1, we can just append our comment locally
         const newComment: Comment = {
           version: 1,
           id: response.comment_id,
@@ -170,13 +191,12 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
           state_id: response.state_id,
         };
         setBug(updatedBug);
-        onRefresh(bug.id, updatedBug); // Update the "cache" in App
+        onRefresh(bug.id, updatedBug);
       } else {
-        // Significant change happened elsewhere, fetch full bug
         const fullBugResult = await apiResult.val.get_bug(username, bug.id);
         if (fullBugResult.ok) {
           setBug(fullBugResult.val);
-          onRefresh(bug.id, fullBugResult.val); // Update the "cache" in App
+          onRefresh(bug.id, fullBugResult.val);
         }
       }
       setCommentText('');
@@ -187,353 +207,296 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
   };
 
   return (
-    <div className="bug-view">
-      <div className="bug-header">
-        <div className="breadcrumbs">
-          {bug.folders.join(' > ')}
-          <span className="bug-id">{bug.id}</span>
-        </div>
-        <div className="bug-title-row">
-          <button onClick={onHome} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '20px' }}>←</button>
-          <button onClick={() => onRefresh(bug.id)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '20px' }}>↻</button>
+    <Box sx={{ width: '100%' }}>
+      <Box sx={{ mb: 3 }}>
+        <Breadcrumbs aria-label="breadcrumb" sx={{ mb: 1 }}>
+          {bug.folders.map((folder, index) => (
+            <Link key={index} underline="hover" color="inherit" href="#">
+              {folder}
+            </Link>
+          ))}
+          <Typography color="text.secondary">{bug.id}</Typography>
+        </Breadcrumbs>
+        
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Tooltip title="Back">
+            <IconButton onClick={onHome} size="small">
+              <ArrowBackIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Refresh">
+            <IconButton onClick={() => onRefresh(bug.id)} size="small">
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
+          
           {hasFullAccess ? (
-            <input 
-              type="text"
+            <TextField
+              variant="standard"
+              fullWidth
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
               onBlur={() => editTitle !== bug.title && handleMetadataChange('title', editTitle)}
-              style={{ flexGrow: 1, background: 'transparent', border: '1px solid #333', color: 'white', fontSize: '20px', padding: '4px 8px' }}
+              InputProps={{
+                style: { fontSize: '1.5rem', fontWeight: 500 }
+              }}
             />
           ) : (
-            <span>{bug.title}</span>
+            <Typography variant="h5" sx={{ fontWeight: 500 }}>{bug.title}</Typography>
           )}
-        </div>
-      </div>
+        </Box>
+      </Box>
 
-      <div className="bug-content-wrapper">
-        <div className="bug-comments">
-          <div className="comment-card description-card">
-            <div className="comment-header">
-              <strong>{bug.metadata.reporter}</strong> created the issue · {formatTemporalDate(bug.metadata.created_at)}
-            </div>
-            {hasFullAccess ? (
-              <textarea 
-                value={editDescription}
-                onChange={(e) => setEditDescription(e.target.value)}
-                onBlur={() => editDescription !== bug.metadata.description && handleMetadataChange('description', editDescription)}
-                style={{ width: '100%', height: '200px', backgroundColor: '#0f0f0f', color: 'white', border: '1px solid #333', padding: '8px', fontFamily: 'inherit' }}
-              />
-            ) : (
-              <div className="description-content" dangerouslySetInnerHTML={renderMarkdown(bug.metadata.description)} />
-            )}
-          </div>
+      <Box sx={{ display: 'flex', gap: 3, flexDirection: { xs: 'column', md: 'row' } }}>
+        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+          <Stack spacing={2}>
+            {/* Description / First Comment */}
+            <Paper variant="outlined" sx={{ p: 2, borderLeft: 4, borderLeftColor: 'primary.main' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1, alignItems: 'center' }}>
+                <Typography variant="caption" color="text.secondary">
+                  <strong>{bug.metadata.reporter}</strong> created the issue · {formatTemporalDate(bug.metadata.created_at)}
+                </Typography>
+                {hasFullAccess && !isEditingDescription && (
+                  <Tooltip title="Edit Description">
+                    <IconButton size="small" onClick={() => setIsEditingDescription(true)}>
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
+              </Box>
+              
+              {isEditingDescription ? (
+                <Stack spacing={2} sx={{ mt: 1 }}>
+                  <TextField
+                    fullWidth
+                    multiline
+                    minRows={6}
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    sx={{ '& .MuiInputBase-root': { bgcolor: 'rgba(0,0,0,0.2)', fontFamily: 'monospace' } }}
+                  />
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Button 
+                      variant="contained" 
+                      size="small"
+                      onClick={() => {
+                        handleMetadataChange('description', editDescription);
+                        setIsEditingDescription(false);
+                      }}
+                    >
+                      Submit Description
+                    </Button>
+                    <Button 
+                      variant="outlined" 
+                      size="small"
+                      onClick={() => {
+                        setEditDescription(bug.metadata.description);
+                        setIsEditingDescription(false);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </Box>
+                </Stack>
+              ) : (
+                <Box 
+                  className="description-content" 
+                  dangerouslySetInnerHTML={renderMarkdown(bug.metadata.description)} 
+                  sx={{ '& p': { m: 0 } }}
+                />
+              )}
+            </Paper>
 
-          {bug.comments.map((comment) => (
-            <div key={comment.id} id={`comment${comment.id}`} className="comment-card">
-              <div className="comment-header">
-                <strong>{comment.author}</strong> commented · {formatTemporalDate(comment.epoch_nanoseconds)} · <a href={`#comment${comment.id}`} style={{ color: '#3b82f6', textDecoration: 'none' }}>#{comment.id}</a>
-              </div>
-              <div dangerouslySetInnerHTML={renderMarkdown(comment.content)} />
-            </div>
-          ))}
+            {/* Comments */}
+            {bug.comments.map((comment) => (
+              <Paper key={comment.id} id={`comment${comment.id}`} variant="outlined" sx={{ p: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    <strong>{comment.author}</strong> commented · {formatTemporalDate(comment.epoch_nanoseconds)}
+                  </Typography>
+                  <Link href={`#comment${comment.id}`} variant="caption" sx={{ textDecoration: 'none' }}>
+                    #{comment.id}
+                  </Link>
+                </Box>
+                <Box dangerouslySetInnerHTML={renderMarkdown(comment.content)} />
+              </Paper>
+            ))}
 
-          {hasCommentAccess && (
-            <div className="comment-input-section" style={{ marginTop: '20px' }}>
-              <textarea
-                style={{
-                  width: 'calc(100% - 20px)',
-                  height: '150px',
-                  backgroundColor: '#1e1e1e',
-                  color: 'white',
-                  border: '1px solid #333',
-                  borderRadius: '4px',
-                  padding: '10px',
-                  fontFamily: 'inherit',
-                  resize: 'vertical'
-                }}
-                placeholder="Add a comment..."
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-              />
-              <div style={{ marginTop: '10px' }}>
-                <button
-                  className="primary-btn"
-                  onClick={handleCommentSubmit}
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? 'submitting...' : 'comment'}
-                </button>
-              </div>
-              <div 
-                className="comment-preview" 
-                style={{ 
-                  marginTop: '20px', 
-                  border: '1px solid #666', 
-                  borderRadius: '4px', 
-                  padding: '10px', 
-                  minHeight: '50px',
-                  color: '#ccc'
-                }}
-              >
-                <div style={{ fontSize: '12px', color: '#888', marginBottom: '5px' }}>Preview</div>
-                <div dangerouslySetInnerHTML={renderMarkdown(commentText || '*No preview*')} />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="bug-metadata">
-          <h3>Metadata</h3>
-          <div className="metadata-item">
-            <div className="metadata-label">Reporter</div>
-            <div className="metadata-value">{bug.metadata.reporter}</div>
-          </div>
-          
-          <div className="metadata-item">
-            <div className="metadata-label">Type</div>
-            {hasFullAccess ? (
-              <select value={bug.metadata.type} onChange={(e) => handleMetadataChange('type', e.target.value)} style={{ width: '100%', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}>
-                <option>Bug</option>
-                <option>Feature</option>
-                <option>Task</option>
-              </select>
-            ) : (
-              <div className="metadata-value">{bug.metadata.type}</div>
-            )}
-          </div>
-
-          <div className="metadata-item">
-            <div className="metadata-label">Priority</div>
-            {hasFullAccess ? (
-              <select value={bug.metadata.priority} onChange={(e) => handleMetadataChange('priority', e.target.value)} style={{ width: '100%', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}>
-                <option>P0</option>
-                <option>P1</option>
-                <option>P2</option>
-                <option>P3</option>
-                <option>P4</option>
-              </select>
-            ) : (
-              <div className="metadata-value">{bug.metadata.priority}</div>
-            )}
-          </div>
-
-          <div className="metadata-item">
-            <div className="metadata-label">Severity</div>
-            {hasFullAccess ? (
-              <select value={bug.metadata.severity} onChange={(e) => handleMetadataChange('severity', e.target.value)} style={{ width: '100%', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}>
-                <option>S0</option>
-                <option>S1</option>
-                <option>S2</option>
-                <option>S3</option>
-                <option>S4</option>
-              </select>
-            ) : (
-              <div className="metadata-value">{bug.metadata.severity}</div>
-            )}
-          </div>
-
-          <div className="metadata-item">
-            <div className="metadata-label">Status</div>
-            {hasFullAccess ? (
-              <select value={bug.metadata.status} onChange={(e) => handleMetadataChange('status', e.target.value)} style={{ width: '100%', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}>
-                <option>New</option>
-                <option>Assigned</option>
-                <option>Fixed</option>
-                <option>Verified</option>
-                <option>Duplicate</option>
-                <option>WontFix</option>
-              </select>
-            ) : (
-              <div className="metadata-value" style={{ backgroundColor: '#1e3a8a', padding: '2px 6px', borderRadius: '4px', display: 'inline-block' }}>{bug.metadata.status}</div>
-            )}
-          </div>
-
-          <div className="metadata-item">
-            <div className="metadata-label">Assignee</div>
-            {hasFullAccess ? (
-              <input 
-                type="text" 
-                defaultValue={bug.metadata.assignee} 
-                onBlur={(e) => e.target.value !== bug.metadata.assignee && handleMetadataChange('assignee', e.target.value)}
-                style={{ width: 'calc(100% - 10px)', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}
-              />
-            ) : (
-              <div className="metadata-value">{bug.metadata.assignee}</div>
-            )}
-          </div>
-
-          <div className="metadata-item">
-            <div className="metadata-label">Verifier</div>
-            {hasFullAccess ? (
-              <input 
-                type="text" 
-                defaultValue={bug.metadata.verifier} 
-                onBlur={(e) => e.target.value !== bug.metadata.verifier && handleMetadataChange('verifier', e.target.value)}
-                style={{ width: 'calc(100% - 10px)', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}
-              />
-            ) : (
-              <div className="metadata-value">{bug.metadata.verifier || 'None'}</div>
-            )}
-          </div>
-
-          <div className="metadata-item">
-            <div className="metadata-label">Collaborators</div>
-            {hasFullAccess ? (
-              <input 
-                type="text" 
-                defaultValue={bug.metadata.collaborators.join(', ')} 
-                onBlur={(e) => e.target.value !== bug.metadata.collaborators.join(', ') && handleMetadataChange('collaborators', e.target.value)}
-                placeholder="user1, user2"
-                style={{ width: 'calc(100% - 10px)', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}
-              />
-            ) : (
-              <div className="metadata-value">{bug.metadata.collaborators.join(', ') || 'None'}</div>
-            )}
-          </div>
-
-          <div className="metadata-item">
-            <div className="metadata-label">CC</div>
-            {hasFullAccess ? (
-              <input 
-                type="text" 
-                defaultValue={bug.metadata.cc.join(', ')} 
-                onBlur={(e) => e.target.value !== bug.metadata.cc.join(', ') && handleMetadataChange('cc', e.target.value)}
-                placeholder="user1, user2"
-                style={{ width: 'calc(100% - 10px)', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}
-              />
-            ) : (
-              <div className="metadata-value">{bug.metadata.cc.join(', ') || 'None'}</div>
-            )}
-          </div>
-
-          <div className="metadata-item">
-            <div className="metadata-label">Access</div>
-            <div className="metadata-value">
-              <span 
-                style={{ color: '#3b82f6', cursor: 'pointer', textDecoration: 'underline' }}
-                onClick={() => setShowAccessModal(true)}
-              >
-                View
-              </span>
-            </div>
-          </div>
-
-          {showAccessModal && (
-            <div style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              backgroundColor: 'rgba(0, 0, 0, 0.7)',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              zIndex: 1000
-            }}>
-              <div style={{
-                backgroundColor: '#1e1e1e',
-                padding: '20px',
-                borderRadius: '8px',
-                width: '500px',
-                maxHeight: '80vh',
-                overflowY: 'auto',
-                border: '1px solid #333',
-                color: 'white'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-                  <h2 style={{ margin: 0 }}>Access Control</h2>
-                  <button 
-                    onClick={() => setShowAccessModal(false)}
-                    style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '20px' }}
+            {/* New Comment Input */}
+            {hasCommentAccess && (
+              <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.paper' }}>
+                <Typography variant="subtitle2" gutterBottom>Add a comment</Typography>
+                <TextField
+                  fullWidth
+                  multiline
+                  minRows={4}
+                  placeholder="Add a comment..."
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  sx={{ '& .MuiInputBase-root': { bgcolor: 'rgba(0,0,0,0.1)' } }}
+                />
+                <Box sx={{ mt: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
+                  <Button 
+                    variant="contained" 
+                    onClick={handleCommentSubmit} 
+                    disabled={isSubmitting || !commentText.trim()}
                   >
-                    ×
-                  </button>
-                </div>
+                    {isSubmitting ? 'Submitting...' : 'Comment'}
+                  </Button>
+                </Box>
                 
-                <div style={{ marginBottom: '20px' }}>
-                  <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>Users who can edit, comment, and view</div>
-                  {hasFullAccess ? (
-                    <input 
-                      type="text" 
-                      defaultValue={bug.metadata.access.full_access.join(', ')}
-                      onBlur={(e) => e.target.value !== bug.metadata.access.full_access.join(', ') && handleMetadataChange('full_access', e.target.value)}
-                      style={{ width: 'calc(100% - 20px)', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '10px', borderRadius: '4px' }}
-                    />
-                  ) : (
-                    <div style={{ backgroundColor: '#2d2d2d', padding: '10px', borderRadius: '4px', minHeight: '30px', border: '1px solid #444' }}>
-                      {bug.metadata.access.full_access.join(', ') || 'None'}
-                    </div>
-                  )}
-                </div>
+                {commentText && (
+                  <Box sx={{ mt: 3, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>Preview</Typography>
+                    <Box dangerouslySetInnerHTML={renderMarkdown(commentText)} />
+                  </Box>
+                )}
+              </Paper>
+            )}
+          </Stack>
+        </Box>
 
-                <div style={{ marginBottom: '20px' }}>
-                  <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>Users who can comment, and view</div>
-                  {hasFullAccess ? (
-                    <input 
-                      type="text" 
-                      defaultValue={bug.metadata.access.comment_access.join(', ')}
-                      onBlur={(e) => e.target.value !== bug.metadata.access.comment_access.join(', ') && handleMetadataChange('comment_access', e.target.value)}
-                      style={{ width: 'calc(100% - 20px)', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '10px', borderRadius: '4px' }}
-                    />
-                  ) : (
-                    <div style={{ backgroundColor: '#2d2d2d', padding: '10px', borderRadius: '4px', minHeight: '30px', border: '1px solid #444' }}>
-                      {bug.metadata.access.comment_access.join(', ') || 'None'}
-                    </div>
-                  )}
-                </div>
+        {/* Sidebar Metadata */}
+        <Box sx={{ width: { xs: '100%', md: 350 }, flexShrink: 0 }}>
+          <Paper variant="outlined" sx={{ p: 2, position: 'sticky', top: 88 }}>
+            <Typography variant="h6" gutterBottom>Metadata</Typography>
+            <Divider sx={{ mb: 2 }} />
+            
+            <Stack spacing={2.5}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Reporter</Typography>
+                <Typography variant="body2">{bug.metadata.reporter}</Typography>
+              </Box>
 
-                <div style={{ marginBottom: '20px' }}>
-                  <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>Users who can view</div>
+              {[
+                { label: 'Status', field: 'status', options: ['New', 'Assigned', 'Fixed', 'Verified', 'Duplicate', 'WontFix'] },
+                { label: 'Priority', field: 'priority', options: ['P0', 'P1', 'P2', 'P3', 'P4'] },
+                { label: 'Severity', field: 'severity', options: ['S0', 'S1', 'S2', 'S3', 'S4'] },
+                { label: 'Type', field: 'type', options: ['Bug', 'Feature', 'Task'] },
+              ].map((meta) => (
+                <Box key={meta.field}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>{meta.label}</Typography>
                   {hasFullAccess ? (
-                    <input 
-                      type="text" 
-                      defaultValue={bug.metadata.access.view_access.join(', ')}
-                      onBlur={(e) => e.target.value !== bug.metadata.access.view_access.join(', ') && handleMetadataChange('view_access', e.target.value)}
-                      style={{ width: 'calc(100% - 20px)', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '10px', borderRadius: '4px' }}
-                    />
+                    <Select
+                      size="small"
+                      fullWidth
+                      value={(bug.metadata as any)[meta.field === 'type' ? 'bug_type' : meta.field]}
+                      onChange={(e) => handleMetadataChange(meta.field, e.target.value)}
+                    >
+                      {meta.options.map(opt => <MenuItem key={opt} value={opt}>{opt}</MenuItem>)}
+                    </Select>
                   ) : (
-                    <div style={{ backgroundColor: '#2d2d2d', padding: '10px', borderRadius: '4px', minHeight: '30px', border: '1px solid #444' }}>
-                      {bug.metadata.access.view_access.join(', ') || 'None'}
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <button 
-                    className="primary-btn" 
-                    onClick={() => setShowAccessModal(false)}
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {bug.metadata.user_metadata.length > 0 && (
-            <>
-              <h3>User Metadata</h3>
-              {bug.metadata.user_metadata.map((entry, idx) => (
-                <div className="metadata-item" key={idx}>
-                  <div className="metadata-label">{entry.key}</div>
-                  {hasFullAccess ? (
-                    <input 
-                      type="text" 
-                      defaultValue={entry.value} 
-                      onBlur={(e) => e.target.value !== entry.value && handleMetadataChange(entry.key, e.target.value)}
-                      style={{ width: 'calc(100% - 10px)', backgroundColor: '#2d2d2d', color: 'white', border: '1px solid #444', padding: '4px' }}
+                    <Chip 
+                      label={(bug.metadata as any)[meta.field === 'type' ? 'bug_type' : meta.field]} 
+                      size="small" 
+                      color={meta.field === 'status' ? 'primary' : 'default'} 
                     />
-                  ) : (
-                    <div className="metadata-value">{entry.value}</div>
                   )}
-                </div>
+                </Box>
               ))}
-            </>
-          )}
-        </div>
-      </div>
-    </div>
+
+              {[
+                { label: 'Assignee', field: 'assignee' },
+                { label: 'Verifier', field: 'verifier' },
+                { label: 'Collaborators', field: 'collaborators', isArray: true },
+                { label: 'CC', field: 'cc', isArray: true },
+              ].map((meta) => (
+                <Box key={meta.field}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>{meta.label}</Typography>
+                  {hasFullAccess ? (
+                    <TextField
+                      size="small"
+                      fullWidth
+                      defaultValue={meta.isArray ? (bug.metadata as any)[meta.field].join(', ') : (bug.metadata as any)[meta.field]}
+                      onBlur={(e) => {
+                        const oldVal = meta.isArray ? (bug.metadata as any)[meta.field].join(', ') : (bug.metadata as any)[meta.field];
+                        if (e.target.value !== oldVal) handleMetadataChange(meta.field, e.target.value);
+                      }}
+                    />
+                  ) : (
+                    <Typography variant="body2">
+                      {meta.isArray ? ((bug.metadata as any)[meta.field].join(', ') || 'None') : ((bug.metadata as any)[meta.field] || 'None')}
+                    </Typography>
+                  )}
+                </Box>
+              ))}
+
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Access Control</Typography>
+                <Link component="button" variant="body2" onClick={() => setShowAccessModal(true)}>
+                  Manage Access
+                </Link>
+              </Box>
+
+              {bug.metadata.user_metadata.length > 0 && (
+                <>
+                  <Divider />
+                  <Typography variant="subtitle2">User Metadata</Typography>
+                  {bug.metadata.user_metadata.map((entry) => (
+                    <Box key={entry.key}>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>{entry.key}</Typography>
+                      {hasFullAccess ? (
+                        <TextField
+                          size="small"
+                          fullWidth
+                          defaultValue={entry.value}
+                          onBlur={(e) => e.target.value !== entry.value && handleMetadataChange(entry.key, e.target.value)}
+                        />
+                      ) : (
+                        <Typography variant="body2">{entry.value}</Typography>
+                      )}
+                    </Box>
+                  ))}
+                </>
+              )}
+            </Stack>
+          </Paper>
+        </Box>
+      </Box>
+
+      {/* Access Control Modal */}
+      <Dialog open={showAccessModal} onClose={() => setShowAccessModal(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          Access Control
+          <IconButton onClick={() => setShowAccessModal(false)} size="small">
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={3} sx={{ mt: 1 }}>
+            {[
+              { label: 'Full Access (Edit, Comment, View)', field: 'full_access' },
+              { label: 'Comment Access (Comment, View)', field: 'comment_access' },
+              { label: 'View Access', field: 'view_access' },
+            ].map((perm) => (
+              <Box key={perm.field}>
+                <Typography variant="subtitle2" gutterBottom>{perm.label}</Typography>
+                {hasFullAccess ? (
+                  <TextField
+                    fullWidth
+                    multiline
+                    rows={2}
+                    placeholder="user1, user2, PUBLIC"
+                    defaultValue={(bug.metadata.access as any)[perm.field].join(', ')}
+                    onBlur={(e) => {
+                      const oldVal = (bug.metadata.access as any)[perm.field].join(', ');
+                      if (e.target.value !== oldVal) handleMetadataChange(perm.field, e.target.value);
+                    }}
+                  />
+                ) : (
+                  <Paper variant="outlined" sx={{ p: 1, bgcolor: 'rgba(0,0,0,0.1)' }}>
+                    <Typography variant="body2">{(bug.metadata.access as any)[perm.field].join(', ') || 'None'}</Typography>
+                  </Paper>
+                )}
+              </Box>
+            ))}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowAccessModal(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
   );
 };
 
