@@ -30,6 +30,8 @@ import PeopleIcon from '@mui/icons-material/People';
 import HistoryIcon from '@mui/icons-material/History';
 import VerifiedIcon from '@mui/icons-material/Verified';
 
+const DRAWER_WIDTH = 250;
+
 const Search = styled('div')(({ theme }) => ({
   position: 'relative',
   borderRadius: theme.shape.borderRadius * 2,
@@ -57,7 +59,6 @@ const SearchIconWrapper = styled('div')(({ theme }) => ({
   justifyContent: 'center',
 }));
 
-
 const StyledInputBase = styled(InputBase)(({ theme }) => ({
   color: 'inherit',
   width: '100%',
@@ -69,18 +70,38 @@ const StyledInputBase = styled(InputBase)(({ theme }) => ({
   },
 }));
 
+const Main = styled('main', { shouldForwardProp: (prop) => prop !== 'open' })<{
+  open?: boolean;
+}>(({ theme, open }) => ({
+  flexGrow: 1,
+  padding: theme.spacing(3),
+  paddingTop: '88px',
+  transition: theme.transitions.create('margin', {
+    easing: theme.transitions.easing.sharp,
+    duration: theme.transitions.duration.leavingScreen,
+  }),
+  marginLeft: `-${DRAWER_WIDTH}px`,
+  overflowY: 'auto',
+  ...(open && {
+    transition: theme.transitions.create('margin', {
+      easing: theme.transitions.easing.easeOut,
+      duration: theme.transitions.duration.enteringScreen,
+    }),
+    marginLeft: 0,
+  }),
+}));
+
 interface LayoutProps {
   children: React.ReactNode;
   username: string;
   onSignOut: () => void;
 }
 
-const DRAWER_WIDTH = 250;
-
 const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(true);
 
   const handleMenu = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -93,6 +114,10 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut }) => {
   const handleSignOut = () => {
     handleClose();
     onSignOut();
+  };
+
+  const toggleDrawer = () => {
+    setIsDrawerOpen(!isDrawerOpen);
   };
 
   const navItems = [
@@ -124,6 +149,7 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut }) => {
             color="inherit"
             aria-label="menu"
             sx={{ mr: 2 }}
+            onClick={toggleDrawer}
           >
             <MenuIcon />
           </IconButton>
@@ -167,7 +193,8 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut }) => {
         </Toolbar>
       </AppBar>
       <Drawer
-        variant="permanent"
+        variant="persistent"
+        open={isDrawerOpen}
         sx={{
           width: DRAWER_WIDTH,
           flexShrink: 0,
@@ -227,9 +254,9 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut }) => {
           ))}
         </List>
       </Drawer>
-      <Box component="main" sx={{ flexGrow: 1, p: 3, pt: '88px', overflowY: 'auto' }}>
+      <Main open={isDrawerOpen}>
         {children}
-      </Box>
+      </Main>
     </Box>
   );
 };
