@@ -125,6 +125,14 @@ export interface BugSummary {
   title: string;
 }
 
+export interface ComponentSummary {
+  id: number;
+  name: string;
+  description: string;
+  folders: string[];
+  parent_id: number;
+}
+
 export interface CreateBugRequest {
   component_id: number;
   template_name: string;
@@ -137,7 +145,6 @@ export interface CreateBugRequest {
   verifier?: string;
   collaborators: string[];
   cc: string[];
-  created_at?: bigint;
 }
 
 export interface CreateComponentRequest {
@@ -207,7 +214,7 @@ export interface API {
   update_bug_access(username: string, id: number, mode: TemplateAccess): Promise<Result<ChangeMetadataResponse, StatusError>>;
   get_component_metadata(username: string, id: number): Promise<Result<ComponentMetadata, StatusError>>;
   update_component_metadata(username: string, id: number, metadata: ComponentMetadata): Promise<Result<void, StatusError>>;
-  get_component_list(username: string): Promise<Result<string[], StatusError>>;
+  get_component_list(username: string): Promise<Result<ComponentSummary[], StatusError>>;
   add_template(username: string, id: number, template: BugTemplate): Promise<Result<void, StatusError>>;
   modify_template(username: string, id: number, old_name: string, template: BugTemplate): Promise<Result<void, StatusError>>;
   delete_template(username: string, id: number, name: string): Promise<Result<void, StatusError>>;

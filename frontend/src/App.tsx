@@ -3,6 +3,7 @@ import { useNavigate, Routes, Route, useParams, useLocation } from 'react-router
 import { get_api, type Bug } from './api/api';
 import BugView from './BugView';
 import HomeView from './HomeView';
+import CreateIssueView from './CreateIssueView';
 import { type Result } from 'standard-ts-lib/src/result';
 import { StatusError } from 'standard-ts-lib/src/status_error';
 import { storage } from './api/storage';
@@ -193,7 +194,7 @@ const App: React.FC = () => {
 
       <div className="main-container">
         <aside className="side-panel">
-          <button className="create-btn">
+          <button className="create-btn" onClick={() => navigate('/create_issue')}>
             <span style={{ fontSize: '24px' }}>+</span> Create Issue
           </button>
           <div 
@@ -217,6 +218,7 @@ const App: React.FC = () => {
             <Route path="/" element={<HomeView onBugSelect={handleBugClick} username={username} />} />
             <Route path="/home" element={<HomeView onBugSelect={handleBugClick} username={username} />} />
             <Route path="/issue/:id" element={<BugLoader currentResult={bugResult} setResult={setBugResult} username={username} />} />
+            <Route path="/create_issue" element={<CreateIssueView username={username} />} />
             <Route path="/login" element={<LoginView onLogin={handleLogin} />} />
           </Routes>
         </main>

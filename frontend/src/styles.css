@@ -75,9 +75,9 @@ body {
 }
 
 .side-panel button.create-btn {
-  background-color: #333;
+  background-color: var(--accent-color);
   color: white;
-  border: 1px solid #444;
+  border: none;
   border-radius: 24px;
   padding: 12px 24px;
   margin-bottom: 24px;
@@ -86,6 +86,11 @@ body {
   align-items: center;
   gap: 8px;
   font-weight: 600;
+  transition: background-color 0.2s;
+}
+
+.side-panel button.create-btn:hover {
+  background-color: #2563eb;
 }
 
 .side-panel .nav-item {

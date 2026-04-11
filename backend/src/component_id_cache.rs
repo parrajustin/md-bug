@@ -37,6 +37,11 @@ impl ComponentIdCache {
         self.id_to_path.get(&id).cloned()
     }
 
+    /// Gets the ID for a hierarchical path.
+    pub fn get_id(&self, path: &str) -> Option<u32> {
+        self.id_to_path.iter().find(|(_, p)| *p == path).map(|(id, _)| *id)
+    }
+
     /// Inserts a mapping into the cache.
     pub fn insert(&mut self, id: u32, path: String) {
         self.id_to_path.insert(id, path);

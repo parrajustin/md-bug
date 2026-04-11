@@ -1,6 +1,6 @@
 import { type Result, Ok, Err } from 'standard-ts-lib/src/result';
 import { StatusError, NotFoundError } from 'standard-ts-lib/src/status_error';
-import type { API, Bug, BugSummary, ChangeMetadataResponse, SubmitCommentResponse, BugStateResponse, ComponentMetadata, BugTemplate, CreateComponentRequest, CreateBugRequest, Permission, TemplateAccess } from './api';
+import type { API, Bug, BugSummary, ComponentSummary, ChangeMetadataResponse, SubmitCommentResponse, BugStateResponse, ComponentMetadata, BugTemplate, CreateComponentRequest, CreateBugRequest, Permission, TemplateAccess } from './api';
 
 export class FakeApi implements API {
   private mockBugs: Bug[] = [
@@ -166,16 +166,31 @@ export class FakeApi implements API {
     });
   }
 
-  async get_component_list(username: string): Promise<Result<string[], StatusError>> {
-    const components = new Set<string>();
-    this.mockBugs.forEach(bug => {
-      let path = "";
-      bug.folders.forEach(folder => {
-        path = path ? `${path}/${folder}` : folder;
-        components.add(path);
-      });
-    });
-    return Ok(Array.from(components).sort());
+  async get_component_list(username: string): Promise<Result<ComponentSummary[], StatusError>> {
+    const components: ComponentSummary[] = [
+      {
+        id: 1,
+        name: "Jetpack (androidx)",
+        description: "Android Jetpack components",
+        folders: ["Android Public Tracker", "App Development"],
+        parent_id: 2
+      },
+      {
+        id: 2,
+        name: "App Development",
+        description: "App development related issues",
+        folders: ["Android Public Tracker"],
+        parent_id: 3
+      },
+      {
+        id: 3,
+        name: "Android Public Tracker",
+        description: "Public tracker for Android",
+        folders: [],
+        parent_id: 0
+      }
+    ];
+    return Ok(components);
   }
 
   async update_component_metadata(username: string, id: number, metadata: ComponentMetadata): Promise<Result<void, StatusError>> {

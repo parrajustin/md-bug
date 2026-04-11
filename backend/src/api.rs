@@ -442,6 +442,16 @@ pub struct BugSummary {
     pub title: String,
 }
 
+/// A brief summary of a component.
+#[derive(SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq)]
+pub struct ComponentSummary {
+    pub id: u32,
+    pub name: String,
+    pub description: String,
+    pub folders: Vec<String>,
+    pub parent_id: u32,
+}
+
 /// Shared application state.
 pub struct AppState {
     /// The root directory where bug data is stored.
@@ -727,7 +737,6 @@ pub struct CreateBugRequest {
     pub verifier: Option<String>,
     pub collaborators: Vec<String>,
     pub cc: Vec<String>,
-    pub created_at: Option<u64>,
 }
 
 /// Creates a new bug in a component.
@@ -782,7 +791,7 @@ pub async fn create_bug(
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let created_at = payload.created_at.unwrap_or(now.as_nanos() as u64);
+    let created_at = now.as_nanos() as u64;
 
     // 8. Apply template-based access control
     let mut access = AccessMetadata::default();
@@ -1074,57 +1083,81 @@ pub async fn get_component_metadata(
 }
 
 /// Retrieves a list of all components (folders) in the system.
-/// 
+///
 /// Process:
-/// 1. Recursively walk the root directory.
-/// 2. For every directory encountered:
-///    a. Filter out the root itself and hidden folders (starting with "__").
-///    b. Filter out folders that are named purely with numbers (these are Bug ID folders).
-///    c. Convert the relative filesystem path to a standard forward-slash path string.
-/// 3. Collect unique paths into a sorted list and return as JSON.
+/// 1. Iterate over all components in the cache.
+/// 2. For each component:
+///    a. Resolve its hierarchical metadata to check view permissions.
+///    b. Read its own metadata to get the display name and description.
+///    c. Calculate the parent ID and folders list.
+/// 3. Return the collected summaries as JSON.
 pub async fn get_component_list(
     State(state): State<Arc<AppState>>,
     Query(query): Query<BugQuery>,
 ) -> impl IntoResponse {
-    let mut components = std::collections::HashSet::new();
+    let mut summaries = Vec::new();
+    let cache_data = {
+        let cache = state.component_cache.lock().unwrap();
+        cache.id_to_path.clone()
+    };
 
-    for entry in WalkDir::new(&state.root)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_dir())
-    {
-        let path = entry.path();
-        if path == state.root {
+    for (id, path_str) in cache_data {
+        // Permission check on resolved metadata
+        let resolved = resolve_component_metadata(&state.root, &path_str);
+        if !resolved.has_permission(&query.u, &Permission::ViewIssues) {
             continue;
         }
 
-        let file_name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(n) => n,
-            None => continue,
+        // Get this component's specific metadata (non-resolved for name/description)
+        let component_path = state.root.join(path_str.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let meta_file = component_path.join("component_metadata");
+
+        let (name, description) = if let Ok(data) = fs::read(&meta_file) {
+            if let Ok(meta) = read_versioned::<ComponentMetadata>(&data) {
+                (meta.name, meta.description)
+            } else {
+                (path_str.split('/').last().unwrap_or("").to_string(), "".to_string())
+            }
+        } else {
+            (path_str.split('/').last().unwrap_or("").to_string(), "".to_string())
         };
 
-        // Skip bug ID folders and hidden folders
-        if file_name.parse::<u64>().is_ok() || file_name.starts_with("__") {
-            continue;
+        let mut folders: Vec<String> = path_str.split('/').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect();
+        // Remove self from folders
+        if !folders.is_empty() {
+            folders.pop();
         }
 
-        if let Ok(relative_path) = path.strip_prefix(&state.root) {
-            let path_str = relative_path.to_string_lossy().replace('\\', "/");
-            if !path_str.is_empty() {
-                // Permission check
-                let resolved_meta = resolve_component_metadata(&state.root, &path_str);
-                if resolved_meta.has_permission(&query.u, &Permission::ViewIssues) {
-                    components.insert(path_str);
-                }
-            }
-        }
+        let parent_path = if path_str.contains('/') {
+            path_str.rsplitn(2, '/').nth(1).unwrap_or("")
+        } else {
+            ""
+        };
+
+        let parent_id = if parent_path.is_empty() {
+            0
+        } else {
+            let cache = state.component_cache.lock().unwrap();
+            cache.get_id(parent_path).unwrap_or(0)
+        };
+
+        summaries.push(ComponentSummary {
+            id,
+            name,
+            description,
+            folders,
+            parent_id,
+        });
     }
 
-    let mut list: Vec<String> = components.into_iter().collect();
-    list.sort();
-    Json(list)
-}
+    summaries.sort_by(|a, b| {
+        let a_full = a.folders.join("/") + "/" + &a.name;
+        let b_full = b.folders.join("/") + "/" + &b.name;
+        a_full.cmp(&b_full)
+    });
 
+    Json(summaries)
+}
 /// Retrieves a list of bugs matching the search criteria.
 /// 
 /// Process:

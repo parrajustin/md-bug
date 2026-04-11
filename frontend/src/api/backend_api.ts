@@ -1,7 +1,7 @@
 import type { Result } from 'standard-ts-lib/src/result';
 import { StatusError, InternalError } from 'standard-ts-lib/src/status_error';
 import { WrapPromise } from 'standard-ts-lib/src/wrap_promise';
-import { type API, type Bug, type BugSummary, type SubmitCommentResponse, type ChangeMetadataResponse, type BugStateResponse, type ComponentMetadata, type BugMetadata, type BugTemplate, type CreateComponentRequest, type CreateBugRequest, type TemplateAccess, bigIntReviver, bigIntReplacer } from './api';
+import { type API, type Bug, type BugSummary, type ComponentSummary, type SubmitCommentResponse, type ChangeMetadataResponse, type BugStateResponse, type ComponentMetadata, type BugMetadata, type BugTemplate, type CreateComponentRequest, type CreateBugRequest, type TemplateAccess, bigIntReviver, bigIntReplacer } from './api';
 
 export class BackendApi implements API {
   private readonly baseUrl: string;
@@ -122,14 +122,14 @@ export class BackendApi implements API {
     );
   }
 
-  async get_component_list(username: string): Promise<Result<string[], StatusError>> {
+  async get_component_list(username: string): Promise<Result<ComponentSummary[], StatusError>> {
     const url = new URL(`${this.baseUrl}/api/component_list`);
     url.searchParams.append('u', username);
     return WrapPromise(
       fetch(url.toString()).then(async resp => {
         if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
         const text = await resp.text();
-        return JSON.parse(text, bigIntReviver) as string[];
+        return JSON.parse(text, bigIntReviver) as ComponentSummary[];
       }),
       'Failed to fetch component list'
     );

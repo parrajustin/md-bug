@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { get_api, type BugSummary } from './api/api';
+import { get_api, type BugSummary, type ComponentSummary } from './api/api';
 
 interface HomeViewProps {
   onBugSelect: (id: number) => void;
@@ -8,7 +8,7 @@ interface HomeViewProps {
 
 const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username }) => {
   const [bugs, setBugs] = useState<BugSummary[]>([]);
-  const [components, setComponents] = useState<string[]>([]);
+  const [components, setComponents] = useState<ComponentSummary[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,6 +38,11 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username }) => {
 
     fetchData();
   }, [username]);
+
+  const formatComponentPath = (c: ComponentSummary) => {
+    if (c.folders.length === 0) return c.name;
+    return c.folders.join(' > ') + ' > ' + c.name;
+  };
 
   if (loading) {
     return (
@@ -89,7 +94,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username }) => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {components.map((comp) => (
               <div 
-                key={comp} 
+                key={comp.id} 
                 style={{ 
                   padding: '8px 12px', 
                   backgroundColor: '#1e1e1e', 
@@ -99,7 +104,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username }) => {
                   cursor: 'default'
                 }}
               >
-                {comp}
+                {formatComponentPath(comp)}
               </div>
             ))}
           </div>
