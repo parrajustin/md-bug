@@ -294,13 +294,13 @@ impl HasVersion for AccessMetadata {
 
 impl BugMetadata {
     pub fn access_level(&self, resolved_meta: &ComponentMetadata, username: &str) -> UserAccessLevel {
-        // 0. Reporter doesn't always have full access.
-
-        // 1. Check sovereign admins first (ComponentAdmin or AdminIssues)
+        // 1. Check sovereign admins (AdminIssues or EditIssues)
+        // Note: ComponentAdmin is for component management and doesn't grant bug access.
+        // Note: Reporter doesn't have implicit access (they are added to full_access on creation).
         for group in resolved_meta.access_control.groups.values() {
             if group.members.contains(&username.to_string()) || group.members.contains(&"PUBLIC".to_string()) {
-                if group.permissions.contains(&Permission::ComponentAdmin) || 
-                   group.permissions.contains(&Permission::AdminIssues) {
+                if group.permissions.contains(&Permission::AdminIssues) ||
+                   group.permissions.contains(&Permission::EditIssues) {
                     return UserAccessLevel::Full;
                 }
             }
@@ -327,9 +327,7 @@ impl BugMetadata {
             // INHERIT from component (non-sovereign permissions)
             for group in resolved_meta.access_control.groups.values() {
                 if group.members.contains(&username.to_string()) || group.members.contains(&"PUBLIC".to_string()) {
-                    if group.permissions.contains(&Permission::EditIssues) {
-                        max_level = std::cmp::max(max_level, UserAccessLevel::Full);
-                    }
+                    // EditIssues moved to sovereign section above
                     if group.permissions.contains(&Permission::CommentOnIssues) {
                         max_level = std::cmp::max(max_level, UserAccessLevel::Comment);
                     }

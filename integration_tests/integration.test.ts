@@ -712,6 +712,56 @@ describe('Integration Test', () => {
     expect(commentRes.ok).toBe(false);
   });
 
+  it('Scenario: Verify bug metadata editing permissions', async () => {
+    /**
+     * Scenario: Verify bug metadata editing permissions
+     * - Setup: User 'admin' creates component 'Project' and bug 'Task'.
+     * - Setup: User 'Editor' has 'EditIssues' permission on 'Project'.
+     * - Setup: User 'IssueAdmin' has 'AdminIssues' permission on 'Project'.
+     * - Setup: User 'BugFullAccess' is explicitly added to 'full_access' of 'Task'.
+     * - Setup: User 'Rando' has only 'ViewIssues' on 'Project'.
+     * - Test: 'Editor', 'IssueAdmin', and 'BugFullAccess' can update 'Task' status.
+     * - Test: 'Rando' cannot update 'Task' status.
+     */
+    console.log('Running Bug Metadata Editing Permissions scenario...');
+    const allId = await findComponentId('admin', 'all');
+    await api.create_component('admin', { name: 'ProjectX', description: 'Project X', parent_id: allId });
+    const projectId = await findComponentId('admin', 'ProjectX');
+
+    const projectMeta = (await api.get_component_metadata('admin', projectId)).unsafeUnwrap();
+    projectMeta.access_control.groups['Issue Editors'].members.push('Editor');
+    projectMeta.access_control.groups['Issue Admins'].members.push('IssueAdmin');
+    await api.update_component_metadata('admin', projectId, projectMeta);
+
+    const bugId = (await api.create_bug('admin', {
+      component_id: projectId,
+      template_name: '',
+      title: 'TaskX',
+      description: 'Task X',
+      collaborators: [],
+      cc: []
+    })).unsafeUnwrap();
+
+    // Add BugFullAccess to bug-specific full_access
+    await api.update_metadata('admin', bugId, 'full_access', 'BugFullAccess');
+
+    // 1. Editor should succeed
+    const res1 = await api.update_metadata('Editor', bugId, 'status', 'Assigned');
+    expect(res1.ok).toBe(true);
+
+    // 2. IssueAdmin should succeed
+    const res2 = await api.update_metadata('IssueAdmin', bugId, 'status', 'Fixed');
+    expect(res2.ok).toBe(true);
+
+    // 3. BugFullAccess should succeed
+    const res3 = await api.update_metadata('BugFullAccess', bugId, 'priority', 'P1');
+    expect(res3.ok).toBe(true);
+
+    // 4. Rando should fail
+    const res4 = await api.update_metadata('Rando', bugId, 'status', 'Verified');
+    expect(res4.ok).toBe(false);
+  });
+
   it('Scenario: Create bug should have user who created it as "full_access"', async () => {
     /**
      * Scenario "Create bug should have user who created it as \"full_access\""

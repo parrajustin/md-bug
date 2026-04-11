@@ -14,7 +14,10 @@ This document captures the architectural decisions, conventions, and "tribal kno
 - **Permission Levels:** We use a granular permission system defined by the `Permission` enum (`ComponentAdmin`, `CreateIssues`, `AdminIssues`, `EditIssues`, `CommentOnIssues`, `ViewIssues`).
 - **Groups:** Permissions are managed via groups in `AccessControl`. Each group has a set of permissions, a `view_level` (for UI filtering), and a list of members.
 - **Public Access:** The special keyword `PUBLIC` can be added to any group's member list to grant those permissions to all users.
-- **Admin Overrides:** Users with `ComponentAdmin` or `AdminIssues` permissions on a component automatically receive `Full` access to all bugs within that component hierarchy.
+- **Component Administration:** `ComponentAdmin` permission allows managing the component itself (metadata, templates, sub-components) but does **NOT** grant any permissions on bugs within that component.
+- **Admin Overrides:** Users with `AdminIssues` or `EditIssues` permissions on a component automatically receive `Full` access to all bugs within that component hierarchy.
+- **Reporter Access:** When a bug is created, the reporter is explicitly added to the bug's `full_access` list. This grants them initial full control, but they can be removed from this list by another user with full access. Being a reporter does **NOT** grant implicit or permanent access.
+- **Tiered Access:** Permissions are strictly linear: `Full Access` > `Comment Access` > `View Access`. Users with `Comment` access implicitly have `View` access. Users with `Full` access implicitly have both.
 
 ### Bug ID Management
 - **BugIdCache:** To avoid expensive full-disk scans, the `BugIdCache` maintains a mapping of Bug IDs to their component paths and tracks the next available Bug and Comment IDs.
