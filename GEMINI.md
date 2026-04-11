@@ -74,3 +74,9 @@ md-bug/
 - **Naming:** Use clear, descriptive component names.
 - **Markdown:** Use standard GitHub-flavored markdown for comments.
 - **Type Safety:** Maintain strict TypeScript interfaces in the frontend to match backend models.
+
+## Memories
+
+When you work on the project and you find some knowledge that would help others add it to "memories.md"
+
+@./memories.md
