@@ -2,7 +2,7 @@ import { spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { BackendApi } from '../frontend/src/api/backend_api';
-import { CreateBugRequest, ComponentMetadata, Permission, TemplateAccess, bigIntReplacer } from '../frontend/src/api/api';
+import { CreateBugRequest, ComponentMetadata, Permission, TemplateAccess, bigIntReplacer, GroupPermissions } from '../frontend/src/api/api';
 
 const BINARY_PATH = path.resolve(__dirname, '../backend/target/debug/md-bug-backend');
 const FRONTEND_DIR = path.resolve(__dirname, '../frontend/public');
@@ -211,9 +211,8 @@ describe('Integration Test', () => {
       cc: []
     })).unsafeUnwrap();
 
-    // Since our update_bug_access only supports modes, let's use a workaround for this test:
-    // admin adds Auditor to collaborators
-    await api.update_metadata('admin', bugId, 'collaborators', 'Auditor');
+    // admin adds Auditor to full_access
+    await api.update_metadata('admin', bugId, 'full_access', 'Auditor');
 
     const auditorList = (await api.get_component_list('Auditor')).unsafeUnwrap();
     expect(auditorList).not.toContain('all/privateproject');
@@ -438,5 +437,280 @@ describe('Integration Test', () => {
     const bug = (await api.get_bug('admin', bugId)).unsafeUnwrap();
     expect(bug.metadata.title).toBe('New Title');
     expect(bug.metadata.description).toBe('New Description');
+  });
+
+  it('Scenario A: Verify inheritance of access fields', async () => {
+    /**
+     * Scenario A "Verify inheritance of access fields"
+     * user "admin" creates root component "Main"
+     * user "admin" creates component "sub" under parent "Main"
+     * user "admin" changes "sub" component metadata to remove all access only leaving themself,
+     * BUT add "random1" to "Issue Contributors" for "view" access.
+     * Also add a few random usernames to the other fields.
+     * user "admin creates component "sub2" under parent "sub"
+     * test that all the access fields in component "sub2" match "sub" and not "Main"
+     */
+    console.log('Running Scenario A...');
+    await api.create_component('admin', { name: 'Main', description: 'Main Root', parent_id: 2 /* all */ });
+    const mainId = await findComponentId('admin', 'Main');
+
+    await api.create_component('admin', { name: 'sub', description: 'sub', parent_id: mainId });
+    const subId = await findComponentId('admin', 'sub');
+
+    const subMeta = (await api.get_component_metadata('admin', subId)).unsafeUnwrap();
+    // Reset access: only admin, and random1 in Contributors (for View)
+    for (const groupName of Object.keys(subMeta.access_control.groups)) {
+      if (groupName === 'Issue Contributors') {
+        subMeta.access_control.groups[groupName].members = ['admin', 'random1'];
+      } else {
+        subMeta.access_control.groups[groupName].members = ['admin'];
+      }
+    }
+    subMeta.collaborators = ['random1', 'random2'];
+    subMeta.cc = ['random3'];
+    await api.update_component_metadata('admin', subId, subMeta);
+
+    await api.create_component('admin', { name: 'sub2', description: 'sub2', parent_id: subId });
+    const sub2Id = await findComponentId('admin', 'sub2');
+
+    const sub2Meta = (await api.get_component_metadata('admin', sub2Id)).unsafeUnwrap();
+    expect(sub2Meta.collaborators).toEqual(['random1', 'random2']);
+    expect(sub2Meta.cc).toEqual(['random3']);
+    
+    // Verify groups were cloned
+    expect(sub2Meta.access_control.groups['Issue Contributors'].members).toContain('random1');
+    for (const groupName of Object.keys(subMeta.access_control.groups)) {
+      if (groupName === 'Issue Contributors') {
+        expect(sub2Meta.access_control.groups[groupName].members).toEqual(['admin', 'random1']);
+      } else {
+        expect(sub2Meta.access_control.groups[groupName].members).toEqual(['admin']);
+      }
+    }
+
+    // Verify random1 can see sub2
+    const viewRes = await api.get_component_metadata('random1', sub2Id);
+    expect(viewRes.ok).toBe(true);
+  });
+
+  it('Scenario B: Verify PUBLIC works even in ADMIN', async () => {
+    /**
+     * Scenario B "Verify PUBLIC works even in ADMIN"
+     * user "admin" creates root component "Main"
+     * user "admin" creates component "sub" under parent "Main"
+     * user "admin" updates access in component "sub" to give admin access to "PUBLIC"
+     * user "random" can create a component under "sub"
+     */
+    console.log('Running Scenario B...');
+    await api.create_component('admin', { name: 'Main', description: 'Main Root', parent_id: 2 });
+    const mainId = await findComponentId('admin', 'Main');
+
+    await api.create_component('admin', { name: 'sub', description: 'sub', parent_id: mainId });
+    const subId = await findComponentId('admin', 'sub');
+
+    const subMeta = (await api.get_component_metadata('admin', subId)).unsafeUnwrap();
+    subMeta.access_control.groups['Component Admins'].members.push('PUBLIC');
+    await api.update_component_metadata('admin', subId, subMeta);
+
+    const createRes = await api.create_component('random', { name: 'random_sub', description: 'random', parent_id: subId });
+    expect(createRes.ok).toBe(true);
+  });
+
+  it('Scenario C: Verify bug inheritance from component access is correct', async () => {
+    /**
+     * Scanario C "Verify bug inheritance from component access is correct"
+     * user "admin" creates root component "Main"
+     * user "admin" gives user "other" "Issue Editors" access in component "Main"
+     * user "admin" gives user "bad_user" "Issue Editors" access in component "Main"
+     * user "other" creates bug "TEST"
+     * user "other" removes public from all permission of bug "TEST".
+     * test that user "bad_user" can view bug since they were in "Issue Editors" of "Main" bug "TEST" should've inherited their access.
+     * - This is to show that bugs should inherit component access to the bug, basically need a mapping of component access to bug representation
+     * user "other" removes all other access from bug "TEST" only leaving themself as an admin access
+     * test that user "bad_user" is not able to comment/view/edit bug "TEST".
+     * - This show that even if you have Issue Editors access or other you can't modify a bug, if you were removed from the list.
+     * test that user "admin" is able to comment/view/edit bug "TEST".
+     * - This shows that as an "Issue Admin" you can modify even when not specified/removed from the bug specific access
+     */
+    console.log('Running Scenario C...');
+    await api.create_component('admin', { name: 'Main', description: 'Main Root', parent_id: 2 });
+    const mainId = await findComponentId('admin', 'Main');
+
+    const mainMeta = (await api.get_component_metadata('admin', mainId)).unsafeUnwrap();
+    mainMeta.access_control.groups['Issue Editors'].members.push('other', 'bad_user');
+    await api.update_component_metadata('admin', mainId, mainMeta);
+
+    const bugId = (await api.create_bug('other', {
+      component_id: mainId, template_name: '', title: 'TEST', description: 'TEST', collaborators: [], cc: []
+    })).unsafeUnwrap();
+
+    // Step 1: Default mode (inherited)
+    await api.update_bug_access('other', bugId, 'Default');
+    const viewRes1 = await api.get_bug('bad_user', bugId);
+    expect(viewRes1.ok).toBe(true);
+
+    // Step 2: other removes all other access except themselves
+    await api.update_bug_access('other', bugId, 'Private');
+    const viewRes2 = await api.get_bug('bad_user', bugId);
+    expect(viewRes2.ok).toBe(false); // bad_user is locked out of Restricted bug
+
+    // Step 3: admin still has access (Sovereign)
+    const viewRes3 = await api.get_bug('admin', bugId);
+    expect(viewRes3.ok).toBe(true);
+  });
+
+  it('Scenario D: Verify Template Deletion/Rename Rules', async () => {
+    /**
+     * Scenario D "Verify Template Deletion/Rename Rules"
+     * - user "admin" creates root component "Main"
+     * - user "admin" tries to delete template with name "" (default) -> should fail (400)
+     * - user "admin" tries to modify template with name "" to a different name -> should fail (400)
+     * - user "admin" creates a new template "Custom" and then successfully deletes it -> should succeed
+     */
+    console.log('Running Scenario D...');
+    await api.create_component('admin', { name: 'Main', description: 'Main Root', parent_id: 2 });
+    const mainId = await findComponentId('admin', 'Main');
+
+    const delRes = await api.delete_template('admin', mainId, '');
+    expect(delRes.ok).toBe(false);
+
+    const modRes = await api.modify_template('admin', mainId, '', {
+      name: 'Renamed', description: '', title: '', collaborators: [], cc: [], default_access: 'Default'
+    });
+    expect(modRes.ok).toBe(false);
+
+    await api.add_template('admin', mainId, {
+      name: 'Custom', description: '', title: '', collaborators: [], cc: [], default_access: 'Default'
+    });
+    const delRes2 = await api.delete_template('admin', mainId, 'Custom');
+    expect(delRes2.ok).toBe(true);
+  });
+
+  it('Scenario E: Verify Component Admin inheritance depth', async () => {
+    /**
+     * Scenario E "Verify Component Admin inheritance depth"
+     * - user "admin" creates root component "Main"
+     * - user "admin" gives user "Alice" "Component Admin" in "Main"
+     * - user "Alice" creates "Sub" under "Main"
+     * - user "Alice" creates "SubSub" under "Sub"
+     * - user "admin" removes user "Alice" from "Main" metadata "Component Admins"
+     * - test that "Alice" still has access to "Sub" and "SubSub" because she was the creator and was explicitly added to their "Component Admin" groups during creation.
+     * - This verifies that creator sovereignty is persistent even if parent permissions change.
+     * - test that "admin" user is a "Component Admin" in component "Sub" and "SubSub"
+     */
+    console.log('Running Scenario E...');
+    await api.create_component('admin', { name: 'Main', description: 'Main Root', parent_id: 2 });
+    const mainId = await findComponentId('admin', 'Main');
+
+    const mainMeta = (await api.get_component_metadata('admin', mainId)).unsafeUnwrap();
+    mainMeta.access_control.groups['Component Admins'].members.push('Alice');
+    await api.update_component_metadata('admin', mainId, mainMeta);
+
+    await api.create_component('Alice', { name: 'Sub', description: 'Sub', parent_id: mainId });
+    const subId = await findComponentId('Alice', 'Sub');
+
+    await api.create_component('Alice', { name: 'SubSub', description: 'SubSub', parent_id: subId });
+    const subSubId = await findComponentId('Alice', 'SubSub');
+
+    // Remove Alice from Main
+    const mainMeta2 = (await api.get_component_metadata('admin', mainId)).unsafeUnwrap();
+    mainMeta2.access_control.groups['Component Admins'].members = ['admin'];
+    await api.update_component_metadata('admin', mainId, mainMeta2);
+
+    // Alice should still be admin in Sub and SubSub
+    const subMeta = (await api.get_component_metadata('Alice', subId)).unsafeUnwrap();
+    expect(subMeta.access_control.groups['Component Admins'].members).toContain('Alice');
+
+    const subSubMeta = (await api.get_component_metadata('Alice', subSubId)).unsafeUnwrap();
+    expect(subSubMeta.access_control.groups['Component Admins'].members).toContain('Alice');
+
+    // admin is also admin there (Sovereign via inheritance)
+    const subMetaAdmin = (await api.get_component_metadata('admin', subId)).unsafeUnwrap();
+    expect(subMetaAdmin.access_control.groups['Component Admins'].members).toContain('admin');
+  });
+
+  it('Scenario F: Verify Bug Search Privacy', async () => {
+    /**
+     * Scenario F "Verify Bug Search Privacy"
+     * - user "admin" creates root component "Public" and "Private"
+     * - user "admin" restricts "Private" to only "admin"
+     * - user "admin" creates bug "Secret" in "Private" and bug "Open" in "Public"
+     * - user "other" calls get_bug_list
+     * - test that "Secret" is NOT in the list but "Open" IS in the list.
+     * - This ensures the WalkDir scan correctly filters based on user access levels.
+     */
+    console.log('Running Scenario F...');
+    await api.create_component('admin', { name: 'PublicComp', description: 'Public', parent_id: 2 });
+    const pubId = await findComponentId('admin', 'PublicComp');
+    await api.create_component('admin', { name: 'PrivateComp', description: 'Private', parent_id: 2 });
+    const privId = await findComponentId('admin', 'PrivateComp');
+
+    const privMeta = (await api.get_component_metadata('admin', privId)).unsafeUnwrap();
+    for (const group of Object.values(privMeta.access_control.groups)) {
+      (group as GroupPermissions).members = ['admin'];
+    }
+    await api.update_component_metadata('admin', privId, privMeta);
+
+    await api.create_bug('admin', { component_id: pubId, template_name: '', title: 'Open', description: '', collaborators: [], cc: [] });
+    await api.create_bug('admin', { component_id: privId, template_name: '', title: 'Secret', description: '', collaborators: [], cc: [] });
+
+    const otherList = (await api.get_bug_list('other')).unsafeUnwrap();
+    const titles = otherList.map(b => b.title);
+    expect(titles).toContain('Open');
+    expect(titles).not.toContain('Secret');
+  });
+
+  it('Scenario G: Verify User Metadata Field Overwrites', async () => {
+    /**
+     * Scenario G "Verify User Metadata Field Overwrites"
+     * - user "admin" creates a bug
+     * - user "admin" updates user_metadata "internal_id" to "123"
+     * - user "admin" updates user_metadata "internal_id" to "456"
+     * - test that bug.metadata.user_metadata contains exactly ONE entry for "internal_id" with value "456".
+     * - This prevents duplicate key bloat in the metadata file.
+     */
+    console.log('Running Scenario G...');
+    const bugId = (await api.create_bug('admin', { component_id: 2, template_name: '', title: 'G Bug', description: '', collaborators: [], cc: [] })).unsafeUnwrap();
+
+    await api.update_metadata('admin', bugId, 'internal_id', '123');
+    await api.update_metadata('admin', bugId, 'internal_id', '456');
+
+    const bug = (await api.get_bug('admin', bugId)).unsafeUnwrap();
+    const internalIdEntries = bug.metadata.user_metadata.filter(m => m.key === 'internal_id');
+    expect(internalIdEntries.length).toBe(1);
+    expect(internalIdEntries[0].value).toBe('456');
+  });
+
+  it('Scenario H: Verify Collaborator Soft-View Access', async () => {
+    /**
+     * Scenario H "Verify Collaborator Soft-View Access"
+     * - user "admin" creates root component "Private" (restricted to admin)
+     * - user "admin" creates bug "Task" in "Private"
+     * - user "admin" adds user "helper" to "collaborators" list of bug "Task" via update_metadata
+     * - test that user "helper" can view the bug (get_bug) even though they cannot see the component in get_component_list.
+     * - test that user "helper" can NOT comment on the bug (unless specifically granted comment access).
+     * - This verifies that collaborators/CC receive "soft" view access to the specific bug.
+     */
+    console.log('Running Scenario H...');
+    await api.create_component('admin', { name: 'PrivateH', description: 'Private', parent_id: 2 });
+    const privId = await findComponentId('admin', 'PrivateH');
+
+    const privMeta = (await api.get_component_metadata('admin', privId)).unsafeUnwrap();
+    for (const group of Object.values(privMeta.access_control.groups)) {
+      (group as GroupPermissions).members = ['admin'];
+    }
+    await api.update_component_metadata('admin', privId, privMeta);
+
+    const bugId = (await api.create_bug('admin', { component_id: privId, template_name: '', title: 'Task', description: '', collaborators: [], cc: [] })).unsafeUnwrap();
+
+    const helperListBefore = (await api.get_component_list('helper')).unsafeUnwrap();
+    expect(helperListBefore).not.toContain('all/privateh');
+
+    await api.update_metadata('admin', bugId, 'collaborators', 'helper');
+
+    const helperBug = await api.get_bug('helper', bugId);
+    expect(helperBug.ok).toBe(true);
+
+    const commentRes = await api.submit_comment('helper', bugId, 'helper', 'Can I help?');
+    expect(commentRes.ok).toBe(false);
   });
 });

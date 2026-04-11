@@ -145,6 +145,7 @@ pub enum TemplateAccess {
     Default,
     LimitedComment,
     LimitedView,
+    Private,
 }
 
 /// Represents a template for creating new bugs.
@@ -294,36 +295,51 @@ impl HasVersion for AccessMetadata {
 
 impl BugMetadata {
     pub fn access_level(&self, resolved_meta: &ComponentMetadata, username: &str) -> UserAccessLevel {
-        let mut max_level = UserAccessLevel::None;
-
+        // 1. Check sovereign admins first (ComponentAdmin or AdminIssues)
         for group in resolved_meta.access_control.groups.values() {
             if group.members.contains(&username.to_string()) || group.members.contains(&"PUBLIC".to_string()) {
                 if group.permissions.contains(&Permission::ComponentAdmin) || 
-                   group.permissions.contains(&Permission::AdminIssues) ||
-                   group.permissions.contains(&Permission::EditIssues) {
-                    max_level = std::cmp::max(max_level, UserAccessLevel::Full);
-                }
-                if group.permissions.contains(&Permission::CommentOnIssues) {
-                    max_level = std::cmp::max(max_level, UserAccessLevel::Comment);
-                }
-                if group.permissions.contains(&Permission::ViewIssues) {
-                    max_level = std::cmp::max(max_level, UserAccessLevel::View);
+                   group.permissions.contains(&Permission::AdminIssues) {
+                    return UserAccessLevel::Full;
                 }
             }
         }
 
-        // 2. Check bug-specific access lists (for compatibility/bug-specific overrides)
-        if self.access.full_access.iter().any(|u| u == username || u == "PUBLIC") {
-            max_level = std::cmp::max(max_level, UserAccessLevel::Full);
-        }
-        if self.access.comment_access.iter().any(|u| u == username || u == "PUBLIC") {
-            max_level = std::cmp::max(max_level, UserAccessLevel::Comment);
-        }
-        if self.access.view_access.iter().any(|u| u == username || u == "PUBLIC") {
-            max_level = std::cmp::max(max_level, UserAccessLevel::View);
+        let is_restricted = !self.access.full_access.is_empty() || 
+                            !self.access.comment_access.is_empty() || 
+                            !self.access.view_access.is_empty();
+
+        let mut max_level = UserAccessLevel::None;
+
+        if is_restricted {
+            // ONLY check bug-specific lists and collaborators/cc
+            if self.access.full_access.iter().any(|u| u == username || u == "PUBLIC") {
+                max_level = std::cmp::max(max_level, UserAccessLevel::Full);
+            }
+            if self.access.comment_access.iter().any(|u| u == username || u == "PUBLIC") {
+                max_level = std::cmp::max(max_level, UserAccessLevel::Comment);
+            }
+            if self.access.view_access.iter().any(|u| u == username || u == "PUBLIC") {
+                max_level = std::cmp::max(max_level, UserAccessLevel::View);
+            }
+        } else {
+            // INHERIT from component (non-sovereign permissions)
+            for group in resolved_meta.access_control.groups.values() {
+                if group.members.contains(&username.to_string()) || group.members.contains(&"PUBLIC".to_string()) {
+                    if group.permissions.contains(&Permission::EditIssues) {
+                        max_level = std::cmp::max(max_level, UserAccessLevel::Full);
+                    }
+                    if group.permissions.contains(&Permission::CommentOnIssues) {
+                        max_level = std::cmp::max(max_level, UserAccessLevel::Comment);
+                    }
+                    if group.permissions.contains(&Permission::ViewIssues) {
+                        max_level = std::cmp::max(max_level, UserAccessLevel::View);
+                    }
+                }
+            }
         }
 
-        // 3. Check collaborators (Full access) and CC (View access)
+        // Collaborators and CC always give at least View access
         if self.collaborators.iter().any(|u| u == username) {
             max_level = std::cmp::max(max_level, UserAccessLevel::View);
         }
@@ -777,6 +793,9 @@ pub async fn create_bug(
         },
         TemplateAccess::LimitedView => {
             access.view_access.push("PUBLIC".to_string());
+        },
+        TemplateAccess::Private => {
+            access.full_access.push(payload.u.clone());
         }
     }
 
@@ -1039,13 +1058,17 @@ pub async fn update_component_metadata(
 pub async fn get_component_metadata(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
-    Query(_query): Query<BugQuery>,
+    Query(query): Query<BugQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let path = {
         let cache = state.component_cache.lock().unwrap();
         cache.get_path(id).ok_or(StatusCode::NOT_FOUND)?
     };
     let resolved = resolve_component_metadata(&state.root, &path);
+    
+    if !resolved.has_permission(&query.u, &Permission::ViewIssues) {
+        return Err(StatusCode::FORBIDDEN);
+    }
     
     Ok(Json(resolved))
 }
@@ -1406,6 +1429,9 @@ pub async fn change_metadata(
         "collaborators" => metadata.collaborators = payload.value.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
         "cc" => metadata.cc = payload.value.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
         "verifier" => metadata.verifier = payload.value,
+        "full_access" => metadata.access.full_access = payload.value.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+        "comment_access" => metadata.access.comment_access = payload.value.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+        "view_access" => metadata.access.view_access = payload.value.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
         _ => {
             if let Some(entry) = metadata.user_metadata.iter_mut().find(|m| m.key == payload.field) {
                 entry.value = payload.value;
@@ -1473,6 +1499,9 @@ pub async fn update_bug_access(
         },
         TemplateAccess::LimitedView => {
             access.view_access.push("PUBLIC".to_string());
+        },
+        TemplateAccess::Private => {
+            access.full_access.push(payload.u.clone());
         }
     }
     metadata.access = access;
