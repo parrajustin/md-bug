@@ -26,16 +26,21 @@ pub fn generate_fake_data(root: &Path) {
         }
     }
 
-    let num_bugs = rng.gen_range(10..30);
+    let num_bugs = rng.gen_range(10..40);
     println!("Generating {} fake bugs...", num_bugs);
 
     let components_pool = vec![
-        "Frontend", "Backend", "UI", "Database", "Auth", "Security", "Network", "API", "Mobile", "Desktop"
+        "Frontend", "Backend", "UI", "Database", "Auth", "Security", "Network", "API", "Mobile", "Desktop",
+        "Performance", "Documentation", "Testing", "DevOps", "Infrastructure"
+    ];
+
+    let users_pool = vec![
+        "admin", "alice", "bob", "charlie", "dave", "eve", "frank", "grace", "heidi", "ivan", "judy", "mallory"
     ];
 
     let priorities = ["P0", "P1", "P2", "P3", "P4"];
     let severities = ["S0", "S1", "S2", "S3", "S4"];
-    let statuses = ["New", "Assigned", "Fixed", "Verified"];
+    let statuses = ["New", "Assigned", "Fixed", "Verified", "Duplicate", "WontFix"];
     let types = ["Bug", "Feature", "Task"];
 
     let mut next_comp_id = 1;
@@ -77,33 +82,59 @@ pub fn generate_fake_data(root: &Path) {
                 let mut templates = HashMap::new();
                 templates.insert("".to_string(), crate::api::BugTemplate::default());
 
+                // Create standard groups
+                let mut groups = HashMap::new();
+                groups.insert("Component Admins".to_string(), GroupPermissions {
+                    permissions: vec![
+                        Permission::ComponentAdmin, Permission::CreateIssues, Permission::AdminIssues,
+                        Permission::EditIssues, Permission::CommentOnIssues, Permission::ViewIssues
+                    ],
+                    view_level: 999,
+                    members: vec![users_pool[rng.gen_range(0..users_pool.len())].to_string()],
+                });
+                groups.insert("Issue Admins".to_string(), GroupPermissions {
+                    permissions: vec![
+                        Permission::CreateIssues, Permission::AdminIssues,
+                        Permission::EditIssues, Permission::CommentOnIssues, Permission::ViewIssues
+                    ],
+                    view_level: 500,
+                    members: vec![users_pool[rng.gen_range(0..users_pool.len())].to_string()],
+                });
+                groups.insert("Issue Editors".to_string(), GroupPermissions {
+                    permissions: vec![
+                        Permission::CreateIssues, Permission::EditIssues, 
+                        Permission::CommentOnIssues, Permission::ViewIssues
+                    ],
+                    view_level: 100,
+                    members: vec![],
+                });
+                groups.insert("Issue Contributors".to_string(), GroupPermissions {
+                    permissions: vec![
+                        Permission::CreateIssues, Permission::CommentOnIssues, Permission::ViewIssues
+                    ],
+                    view_level: 1,
+                    members: vec!["PUBLIC".to_string()],
+                });
+
                 let comp_meta = ComponentMetadata {
                     version: CURRENT_VERSION,
                     id: next_comp_id,
                     name: f.clone(),
                     description: format!("Description for component {}", f),
-                    creator: SafeEmail().fake(),
+                    creator: users_pool[rng.gen_range(0..users_pool.len())].to_string(),
                     bug_type: Some(types[rng.gen_range(0..types.len())].to_string()),
                     priority: Some(priorities[rng.gen_range(0..priorities.len())].to_string()),
                     severity: Some(severities[rng.gen_range(0..severities.len())].to_string()),
-                    verifier: Some(SafeEmail().fake()),
-                    collaborators: vec![SafeEmail().fake()],
-                    cc: vec![SafeEmail().fake()],
-                    access_control: AccessControl { groups: {
-                        let mut g = HashMap::new();
-                        g.insert("Component Admins".to_string(), GroupPermissions {
-                            permissions: vec![Permission::ComponentAdmin, Permission::ViewIssues, Permission::CommentOnIssues, Permission::EditIssues, Permission::CreateIssues, Permission::AdminIssues],
-                            view_level: 999,
-                            members: vec![SafeEmail().fake()],
-                        });
-                        g
-                    }},
+                    verifier: Some(users_pool[rng.gen_range(0..users_pool.len())].to_string()),
+                    collaborators: vec![users_pool[rng.gen_range(0..users_pool.len())].to_string()],
+                    cc: vec![users_pool[rng.gen_range(0..users_pool.len())].to_string()],
+                    access_control: AccessControl { groups },
                     templates,
                     default_template: "".to_string(),
                     user_metadata: vec![],
                     created_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0),
                 };
-                if let Ok(bytes) = rkyv::to_bytes::<_, 1024>(&comp_meta) {
+                if let Ok(bytes) = rkyv::to_bytes::<_, 2048>(&comp_meta) {
                     let _ = fs::write(meta_file, bytes);
                     last_comp_id = next_comp_id;
                     next_comp_id += 1;
@@ -126,32 +157,22 @@ pub fn generate_fake_data(root: &Path) {
             continue;
         }
 
-        let mut comment_access = vec![SafeEmail().fake()];
-        let mut view_access = vec![SafeEmail().fake()];
-        if rng.gen_bool(0.5) {
-            comment_access.push("PUBLIC".to_string());
-        } else {
-            view_access.push("PUBLIC".to_string());
-        }
-
         let metadata = BugMetadata {
             version: CURRENT_VERSION,
             id: bug_id,
-            reporter: SafeEmail().fake(),
+            reporter: users_pool[rng.gen_range(0..users_pool.len())].to_string(),
             bug_type: types[rng.gen_range(0..types.len())].to_string(),
             priority: priorities[rng.gen_range(0..priorities.len())].to_string(),
             severity: severities[rng.gen_range(0..severities.len())].to_string(),
             status: statuses[rng.gen_range(0..statuses.len())].to_string(),
-            assignee: SafeEmail().fake(),
-            verifier: SafeEmail().fake(),
-            collaborators: vec![SafeEmail().fake(), SafeEmail().fake()],
-            cc: vec![SafeEmail().fake()],
-            access: AccessMetadata {
-                version: CURRENT_VERSION,
-                full_access: vec![SafeEmail().fake()],
-                comment_access,
-                view_access,
-            },
+            assignee: users_pool[rng.gen_range(0..users_pool.len())].to_string(),
+            verifier: users_pool[rng.gen_range(0..users_pool.len())].to_string(),
+            collaborators: vec![
+                users_pool[rng.gen_range(0..users_pool.len())].to_string(),
+                users_pool[rng.gen_range(0..users_pool.len())].to_string()
+            ],
+            cc: vec![users_pool[rng.gen_range(0..users_pool.len())].to_string()],
+            access: AccessMetadata::default(),
             title: Sentence(3..8).fake(),
             component_id: last_comp_id,
             description: Paragraph(1..5).fake(),
@@ -160,21 +181,21 @@ pub fn generate_fake_data(root: &Path) {
             state_id: 1,
         };
 
-        if let Ok(bytes) = rkyv::to_bytes::<_, 1024>(&metadata) {
+        if let Ok(bytes) = rkyv::to_bytes::<_, 8192>(&metadata) {
             let _ = fs::write(bug_path.join("metadata"), bytes);
         }
 
-        let num_comments = rng.gen_range(0..5);
+        let num_comments = rng.gen_range(1..6);
         for c_id in 1..=num_comments {
             let comment = Comment {
                 version: CURRENT_VERSION,
                 id: c_id as u32,
-                author: SafeEmail().fake(),
+                author: users_pool[rng.gen_range(0..users_pool.len())].to_string(),
                 epoch_nanoseconds: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0),
                 content: Paragraph(1..3).fake(),
             };
 
-            if let Ok(bytes) = rkyv::to_bytes::<_, 256>(&comment) {
+            if let Ok(bytes) = rkyv::to_bytes::<_, 1024>(&comment) {
                 let _ = fs::write(bug_path.join(format!("comment_{:07}", c_id)), bytes);
             }
         }
