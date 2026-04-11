@@ -323,6 +323,14 @@ impl BugMetadata {
             max_level = std::cmp::max(max_level, UserAccessLevel::View);
         }
 
+        // 3. Check collaborators (Full access) and CC (View access)
+        if self.collaborators.iter().any(|u| u == username) {
+            max_level = std::cmp::max(max_level, UserAccessLevel::View);
+        }
+        if self.cc.iter().any(|u| u == username) {
+            max_level = std::cmp::max(max_level, UserAccessLevel::View);
+        }
+
         max_level
     }
 }
@@ -1393,6 +1401,11 @@ pub async fn change_metadata(
         "severity" => metadata.severity = payload.value,
         "assignee" => metadata.assignee = payload.value,
         "type" => metadata.bug_type = payload.value,
+        "title" => metadata.title = payload.value,
+        "description" => metadata.description = payload.value,
+        "collaborators" => metadata.collaborators = payload.value.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+        "cc" => metadata.cc = payload.value.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+        "verifier" => metadata.verifier = payload.value,
         _ => {
             if let Some(entry) = metadata.user_metadata.iter_mut().find(|m| m.key == payload.field) {
                 entry.value = payload.value;
@@ -1414,6 +1427,60 @@ pub async fn change_metadata(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     fs::write(metadata_file, bytes)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(ChangeMetadataResponse {
+        state_id: new_state_id,
+    }))
+}
+
+/// Request payload for updating bug access.
+#[derive(SerdeDeserialize)]
+pub struct UpdateBugAccessRequest {
+    pub u: String,
+    pub mode: TemplateAccess,
+}
+
+/// Updates the access control for a specific bug.
+pub async fn update_bug_access(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<u32>,
+    Json(payload): Json<UpdateBugAccessRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let lock = state.get_bug_lock(id);
+    let _guard = lock.lock().await;
+    let bug_path = find_bug_path(&state, id).ok_or(StatusCode::NOT_FOUND)?;
+
+    let metadata_file = bug_path.join("metadata");
+    let data = fs::read(&metadata_file).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut metadata: BugMetadata = read_versioned::<BugMetadata>(&data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let resolved_meta = {
+        let component_cache = state.component_cache.lock().unwrap();
+        let path = component_cache.get_path(metadata.component_id).unwrap_or_default();
+        resolve_component_metadata(&state.root, &path)
+    };
+
+    if metadata.access_level(&resolved_meta, &payload.u) < UserAccessLevel::Full {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // Apply access mode
+    let mut access = AccessMetadata::default();
+    match payload.mode {
+        TemplateAccess::Default => {},
+        TemplateAccess::LimitedComment => {
+            access.comment_access.push("PUBLIC".to_string());
+        },
+        TemplateAccess::LimitedView => {
+            access.view_access.push("PUBLIC".to_string());
+        }
+    }
+    metadata.access = access;
+    metadata.state_id += 1;
+    let new_state_id = metadata.state_id;
+
+    let bytes = rkyv::to_bytes::<_, 1024>(&metadata).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    fs::write(&metadata_file, bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(ChangeMetadataResponse {
         state_id: new_state_id,

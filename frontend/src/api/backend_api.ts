@@ -1,7 +1,7 @@
 import type { Result } from 'standard-ts-lib/src/result';
 import { StatusError, InternalError } from 'standard-ts-lib/src/status_error';
 import { WrapPromise } from 'standard-ts-lib/src/wrap_promise';
-import { type API, type Bug, type BugSummary, type SubmitCommentResponse, type ChangeMetadataResponse, type BugStateResponse, type ComponentMetadata, type BugTemplate, type CreateComponentRequest, type CreateBugRequest, bigIntReviver, bigIntReplacer } from './api';
+import { type API, type Bug, type BugSummary, type SubmitCommentResponse, type ChangeMetadataResponse, type BugStateResponse, type ComponentMetadata, type BugMetadata, type BugTemplate, type CreateComponentRequest, type CreateBugRequest, type TemplateAccess, bigIntReviver, bigIntReplacer } from './api';
 
 export class BackendApi implements API {
   private readonly baseUrl: string;
@@ -66,9 +66,9 @@ export class BackendApi implements API {
     );
   }
 
-  async change_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>> {
+  async update_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>> {
     return WrapPromise(
-      fetch(`${this.baseUrl}/api/bug/${id}/metadata`, {
+      fetch(`${this.baseUrl}/api/bug/${id}/update_metadata`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ field, value, u: username }, bigIntReplacer)
@@ -77,7 +77,22 @@ export class BackendApi implements API {
         const text = await resp.text();
         return JSON.parse(text, bigIntReviver) as ChangeMetadataResponse;
       }),
-      'Failed to change metadata'
+      'Failed to update metadata'
+    );
+  }
+
+  async update_bug_access(username: string, id: number, mode: TemplateAccess): Promise<Result<ChangeMetadataResponse, StatusError>> {
+    return WrapPromise(
+      fetch(`${this.baseUrl}/api/bug/${id}/update_access`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ u: username, mode }, bigIntReplacer)
+      }).then(async resp => {
+        if (!resp.ok) throw InternalError(`Server returned ${resp.status}`);
+        const text = await resp.text();
+        return JSON.parse(text, bigIntReviver) as ChangeMetadataResponse;
+      }),
+      'Failed to update bug access'
     );
   }
 
