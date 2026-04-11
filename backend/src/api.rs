@@ -433,6 +433,16 @@ pub struct Bug {
 pub struct BugSummary {
     pub id: u32,
     pub title: String,
+    pub description: String,
+    pub status: String,
+    pub priority: String,
+    pub severity: String,
+    #[serde(rename = "type")]
+    pub bug_type: String,
+    #[serde(serialize_with = "serialize_u64_as_string_n", deserialize_with = "deserialize_u64_from_string_n")]
+    pub created_at: u64,
+    #[serde(serialize_with = "serialize_u64_as_string_n", deserialize_with = "deserialize_u64_from_string_n")]
+    pub last_updated_at: u64,
 }
 
 /// A brief summary of a component.
@@ -1200,9 +1210,21 @@ pub async fn get_bug_list(
             || metadata.reporter.to_lowercase().contains(&q);
 
         if matches {
+            let last_updated_at = fs::metadata(entry.path())
+                .and_then(|m| m.modified())
+                .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64)
+                .unwrap_or(metadata.created_at);
+
             summaries.push(BugSummary {
                 id: metadata.id,
                 title: metadata.title.clone(),
+                description: metadata.description.clone(),
+                status: metadata.status.clone(),
+                priority: metadata.priority.clone(),
+                severity: metadata.severity.clone(),
+                bug_type: metadata.bug_type.clone(),
+                created_at: metadata.created_at,
+                last_updated_at,
             });
         }
     }

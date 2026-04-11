@@ -56,7 +56,17 @@ export class FakeApi implements API {
       const q = query.toLowerCase();
       bugs = bugs.filter(b => b.title.toLowerCase().includes(q));
     }
-    return Ok(bugs.map(b => ({ id: b.id, title: b.title })));
+    return Ok(bugs.map(b => ({ 
+      id: b.id, 
+      title: b.title, 
+      description: b.metadata.description,
+      status: b.metadata.status,
+      priority: b.metadata.priority,
+      severity: b.metadata.severity,
+      type: b.metadata.type,
+      created_at: b.metadata.created_at,
+      last_updated_at: b.metadata.created_at // For fake, just use created_at
+    })));
   }
 
   async get_bug(username: string, id: number): Promise<Result<Bug, StatusError>> {

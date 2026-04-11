@@ -567,3 +567,41 @@ async fn test_create_bug_with_template_access() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_get_bug_list_expanded() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let root = dir.path();
+
+    // Create a component and a bug
+    create_test_component(root, "comp", "Comp", vec!["admin".to_string()], vec!["PUBLIC".to_string()])?;
+    create_test_bug(root, 123, 1, vec!["comp".to_string()])?;
+
+    let mut component_cache = ComponentIdCache::default();
+    component_cache.insert(1, "comp".to_string());
+
+    let cache = BugIdCache::load_and_update(root);
+    let state = Arc::new(AppState { 
+        root: root.to_path_buf(),
+        bug_cache: cache,
+        component_cache: Mutex::new(component_cache),
+        bug_locks: Mutex::new(HashMap::new()),
+        component_locks: Mutex::new(HashMap::new()),
+    });
+
+    let res = get_bug_list(State(state), Query(SearchQuery { q: None, u: "admin".to_string() })).await.into_response();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(res.into_body(), 1024 * 1024).await?;
+    let summaries: Vec<serde_json::Value> = serde_json::from_slice(&body)?;
+
+    assert_eq!(summaries.len(), 1);
+    let bug = &summaries[0];
+    assert_eq!(bug["id"], 123);
+    assert_eq!(bug["title"], "Test Bug 123");
+    assert_eq!(bug["description"], "Test bug description");
+    assert!(bug["created_at"].is_string());
+    assert!(bug["last_updated_at"].is_string());
+    
+    Ok(())
+}

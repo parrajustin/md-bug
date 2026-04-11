@@ -123,6 +123,13 @@ export interface Bug {
 export interface BugSummary {
   id: number;
   title: string;
+  description: string;
+  status: string;
+  priority: string;
+  severity: string;
+  type: string;
+  created_at: bigint;
+  last_updated_at: bigint;
 }
 
 export interface ComponentSummary {
@@ -168,6 +175,7 @@ export function bigIntReplacer(_key: string, value: any): any {
 export function bigIntReviver(key: string, value: any): any {
   const isBigIntField = 
     key === 'created_at' || 
+    key === 'last_updated_at' ||
     key === 'state_id' || 
     key === 'epoch_nanoseconds';
 

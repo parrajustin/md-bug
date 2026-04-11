@@ -317,3 +317,143 @@ pre {
   background-color: #1a1a1a;
   margin-bottom: 24px;
 }
+
+/* Dropdown Menu Styles */
+.dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-toggle {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 4px;
+  font-size: 1.2rem;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.dropdown-toggle:hover {
+  background-color: var(--hover-bg);
+  color: white;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background-color: #262626;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  min-width: 150px;
+  padding: 4px 0;
+}
+
+.dropdown-item {
+  padding: 8px 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #ccc;
+  font-size: 0.9rem;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.dropdown-item:hover {
+  background-color: var(--hover-bg);
+  color: white;
+}
+
+.submenu-container {
+  position: relative;
+}
+
+.submenu {
+  position: absolute;
+  top: 0;
+  right: 100%;
+  background-color: #262626;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  min-width: 200px;
+  padding: 4px 0;
+  display: none;
+}
+
+.submenu-container:hover .submenu {
+  display: block;
+}
+
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  cursor: pointer;
+  color: #ccc;
+  font-size: 0.9rem;
+  transition: background-color 0.2s;
+}
+
+.check-item:hover {
+  background-color: var(--hover-bg);
+  color: white;
+}
+
+.check-item input {
+  cursor: pointer;
+}
+
+.sortable-header {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sortable-header:hover {
+  color: white;
+}
+
+.sort-icon {
+  font-size: 0.8rem;
+  opacity: 0.5;
+}
+
+.sort-icon.active {
+  opacity: 1;
+  color: var(--accent-color);
+}
+
+.col-description {
+  max-width: 300px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 16px;
+}
+
+.col-timestamp {
+  width: 180px;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.col-small {
+  width: 100px;
+  flex-shrink: 0;
+}
+
+.col-tiny {
+  width: 60px;
+  flex-shrink: 0;
+}
