@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   Box, 
@@ -36,9 +36,8 @@ import SaveIcon from '@mui/icons-material/Save';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import CheckIcon from '@mui/icons-material/Check';
-import ClearIcon from '@mui/icons-material/Clear';
-import { get_api, type ComponentMetadata, type Permission, type BugTemplate, type UserMetadataEntry } from './api/api';
+import FolderIcon from '@mui/icons-material/Folder';
+import { get_api, type ComponentMetadata, type Permission, type ComponentSummary } from './api/api';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -87,17 +86,26 @@ const ComponentEditorView: React.FC<ComponentEditorViewProps> = ({ username }) =
   const [isSaving, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<ComponentMetadata | null>(null);
+  const [components, setComponents] = useState<ComponentSummary[]>([]);
 
   useEffect(() => {
     const fetchData = async () => {
       if (!id) return;
       const apiResult = get_api();
       if (apiResult.ok) {
-        const res = await apiResult.val.get_component_metadata(username, parseInt(id));
-        if (res.ok) {
-          setMetadata(res.val);
+        const [metaRes, compsRes] = await Promise.all([
+          apiResult.val.get_component_metadata(username, parseInt(id)),
+          apiResult.val.get_component_list(username)
+        ]);
+
+        if (metaRes.ok) {
+          setMetadata(metaRes.val);
         } else {
-          setError(res.val.message);
+          setError(metaRes.val.message);
+        }
+
+        if (compsRes.ok) {
+          setComponents(compsRes.val);
         }
       } else {
         setError("API not available");
@@ -106,6 +114,16 @@ const ComponentEditorView: React.FC<ComponentEditorViewProps> = ({ username }) =
     };
     fetchData();
   }, [id, username]);
+
+  const subComponents = useMemo(() => {
+    if (!metadata) return [];
+    return components.filter(c => c.parent_id === metadata.id);
+  }, [components, metadata]);
+
+  const formatComponentPath = (c: ComponentSummary) => {
+    if (c.folders.length === 0) return c.name;
+    return c.folders.join(' > ') + ' > ' + c.name;
+  };
 
   const handleSave = async () => {
     if (!metadata || !id) return;
@@ -135,8 +153,8 @@ const ComponentEditorView: React.FC<ComponentEditorViewProps> = ({ username }) =
   if (error || !metadata) return <Box sx={{ p: 4 }}><Typography color="error">Error: {error || "Component not found"}</Typography></Box>;
 
   return (
-    <Box sx={{ width: '100%' }}>
-      <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
+    <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <Box sx={{ mb: 0, display: 'flex', alignItems: 'center', gap: 2 }}>
         <IconButton onClick={() => navigate(-1)} size="small"><ArrowBackIcon /></IconButton>
         <Typography variant="h4" sx={{ fontWeight: 500 }}>
           {metadata.name} <Typography component="span" variant="h4" color="text.secondary">({metadata.id})</Typography>
@@ -178,78 +196,6 @@ const ComponentEditorView: React.FC<ComponentEditorViewProps> = ({ username }) =
                 rows={4} 
                 value={metadata.description} 
                 onChange={(e) => updateField('description', e.target.value)}
-              />
-              
-              <Divider sx={{ my: 1 }} />
-              <Typography variant="subtitle2" color="primary">Defaults for new bugs</Typography>
-              
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={4}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel>Bug Type</InputLabel>
-                    <Select value={metadata.bug_type || ''} label="Bug Type" onChange={(e) => updateField('bug_type', e.target.value)}>
-                      <MenuItem value="Bug">Bug</MenuItem>
-                      <MenuItem value="Feature">Feature</MenuItem>
-                      <MenuItem value="Task">Task</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Grid>
-                <Grid item xs={12} sm={4}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel>Priority</InputLabel>
-                    <Select value={metadata.priority || ''} label="Priority" onChange={(e) => updateField('priority', e.target.value)}>
-                      {['P0', 'P1', 'P2', 'P3', 'P4'].map(p => <MenuItem key={p} value={p}>{p}</MenuItem>)}
-                    </Select>
-                  </FormControl>
-                </Grid>
-                <Grid item xs={12} sm={4}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel>Severity</InputLabel>
-                    <Select value={metadata.severity || ''} label="Severity" onChange={(e) => updateField('severity', e.target.value)}>
-                      {['S0', 'S1', 'S2', 'S3', 'S4'].map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
-                    </Select>
-                  </FormControl>
-                </Grid>
-              </Grid>
-
-              <TextField 
-                label="Assignee" 
-                fullWidth 
-                size="small" 
-                value={metadata.verifier || ''} 
-                onChange={(e) => updateField('verifier', e.target.value)} 
-              />
-
-              <Autocomplete
-                multiple
-                options={[]}
-                freeSolo
-                value={metadata.collaborators}
-                onChange={(_e, val) => updateField('collaborators', val)}
-                renderTags={(value: string[], getTagProps) =>
-                  value.map((option: string, index: number) => (
-                    <Chip variant="outlined" label={option} {...getTagProps({ index })} />
-                  ))
-                }
-                renderInput={(params) => (
-                  <TextField {...params} label="Collaborators" placeholder="Add user..." size="small" />
-                )}
-              />
-
-              <Autocomplete
-                multiple
-                options={[]}
-                freeSolo
-                value={metadata.cc}
-                onChange={(_e, val) => updateField('cc', val)}
-                renderTags={(value: string[], getTagProps) =>
-                  value.map((option: string, index: number) => (
-                    <Chip variant="outlined" label={option} {...getTagProps({ index })} />
-                  ))
-                }
-                renderInput={(params) => (
-                  <TextField {...params} label="CC" placeholder="Add user..." size="small" />
-                )}
               />
             </Stack>
           </CustomTabPanel>
@@ -355,6 +301,52 @@ const ComponentEditorView: React.FC<ComponentEditorViewProps> = ({ username }) =
               ))}
             </Stack>
           </CustomTabPanel>
+        </CardContent>
+      </Card>
+
+      {/* Sub-Components Card */}
+      <Card variant="outlined">
+        <CardHeader 
+          title="Sub-Components" 
+          titleTypographyProps={{ variant: 'h6', sx: { fontWeight: 'bold' } }}
+        />
+        <Divider />
+        <CardContent>
+          {subComponents.length === 0 && (
+            <Typography color="text.secondary">No sub-components found.</Typography>
+          )}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {subComponents.map((comp) => (
+              <Paper 
+                key={comp.id} 
+                variant="outlined"
+                onClick={() => navigate(`/component/${comp.id}`)}
+                sx={{ 
+                  p: 1.5, 
+                  bgcolor: '#1e1e1e',
+                  borderColor: 'divider',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 2,
+                  '&:hover': { 
+                    bgcolor: '#252525',
+                    borderColor: 'primary.main'
+                  }
+                }}
+              >
+                <FolderIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                <Box>
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                    {comp.name}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {formatComponentPath(comp)}
+                  </Typography>
+                </Box>
+              </Paper>
+            ))}
+          </Box>
         </CardContent>
       </Card>
     </Box>
