@@ -114,9 +114,6 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchVa
   const handleSearchSubmit = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       onSearch(localSearch);
-      if (location.pathname !== '/' && location.pathname !== '/home') {
-        navigate('/');
-      }
     }
   };
 

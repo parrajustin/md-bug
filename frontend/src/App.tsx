@@ -18,9 +18,10 @@ interface BugLoaderProps {
   currentResult: Result<Bug, StatusError> | null;
   setResult: (result: Result<Bug, StatusError> | null) => void;
   username: string;
+  onSearch: (query: string) => void;
 }
 
-const BugLoader: React.FC<BugLoaderProps> = ({ currentResult, setResult, username }) => {
+const BugLoader: React.FC<BugLoaderProps> = ({ currentResult, setResult, username, onSearch }) => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [loading, setLoading] = useState<boolean>(false);
@@ -86,6 +87,7 @@ const BugLoader: React.FC<BugLoaderProps> = ({ currentResult, setResult, usernam
         bug={currentResult.val} 
         onHome={() => navigate('/')} 
         username={username}
+        onSearch={onSearch}
         onRefresh={(id, updatedBug) => {
           if (updatedBug) {
             setResult({ ok: true, val: updatedBug } as Result<Bug, StatusError>);
@@ -152,6 +154,7 @@ const App: React.FC = () => {
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
+    navigate('/');
   };
 
   if (checkingUsername) {
@@ -183,7 +186,7 @@ const App: React.FC = () => {
         <Routes>
           <Route path="/" element={<HomeView onBugSelect={handleBugClick} username={username} search={searchQuery} onSearch={handleSearch} />} />
           <Route path="/home" element={<HomeView onBugSelect={handleBugClick} username={username} search={searchQuery} onSearch={handleSearch} />} />
-          <Route path="/issue/:id" element={<BugLoader currentResult={bugResult} setResult={setBugResult} username={username} />} />
+          <Route path="/issue/:id" element={<BugLoader currentResult={bugResult} setResult={setBugResult} username={username} onSearch={handleSearch} />} />
           <Route path="/create_issue" element={<CreateIssueView username={username} />} />
           <Route path="/login" element={<LoginView onLogin={handleLogin} />} />
         </Routes>

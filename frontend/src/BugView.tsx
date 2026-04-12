@@ -39,10 +39,11 @@ interface BugViewProps {
   bug: Bug;
   onHome: () => void;
   onRefresh: (id: number, updatedBug?: Bug) => void;
+  onSearch: (query: string) => void;
   username: string;
 }
 
-const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, username }) => {
+const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, onSearch, username }) => {
   const [bug, setBug] = useState<Bug>(initialBug);
   const [commentText, setCommentText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -211,7 +212,14 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, u
       <Box sx={{ mb: 3 }}>
         <Breadcrumbs aria-label="breadcrumb" sx={{ mb: 1 }}>
           {bug.folders.map((folder, index) => (
-            <Link key={index} underline="hover" color="inherit" href="#">
+            <Link 
+              key={index} 
+              underline="hover" 
+              color="inherit" 
+              component="button"
+              onClick={() => onSearch(`componentid:${bug.folder_ids[index]}`)}
+              sx={{ verticalAlign: 'baseline', fontSize: 'inherit' }}
+            >
               {folder}
             </Link>
           ))}
