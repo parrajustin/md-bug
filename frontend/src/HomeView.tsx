@@ -25,6 +25,8 @@ import {
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import FolderIcon from '@mui/icons-material/Folder';
+import EditIcon from '@mui/icons-material/Edit';
+import { useNavigate } from 'react-router-dom';
 import { get_api, type BugSummary, type ComponentSummary } from './api/api';
 
 interface HomeViewProps {
@@ -54,10 +56,12 @@ interface VisibleColumns {
 }
 
 const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username, search, onSearch }) => {
+  const navigate = useNavigate();
   const [bugs, setBugs] = useState<BugSummary[]>([]);
   const [components, setComponents] = useState<ComponentSummary[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [canAdmin, setCanAdmin] = useState(false);
   
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'last_updated_at', direction: 'desc' });
   const [visibleColumns, setVisibleColumns] = useState<VisibleColumns>({
@@ -91,10 +95,6 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username, search, onSe
   // Filter components to show only children if an active component is selected
   const filteredComponents = useMemo(() => {
     if (activeComponentId === null) {
-      // Show top-level components or everything? 
-      // Original logic showed everything. Let's keep it but maybe only show roots if requested?
-      // User said "show all components that are children to the currently selected component"
-      // implying if NOT selected, show roots.
       return components.filter(c => c.parent_id === 0);
     }
     return components.filter(c => c.parent_id === activeComponentId);
@@ -127,6 +127,35 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username, search, onSe
 
     fetchData();
   }, [username, search]);
+
+  // Check permissions for the active component
+  useEffect(() => {
+    const checkPerms = async () => {
+      if (activeComponentId === null) {
+        setCanAdmin(false);
+        return;
+      }
+      const apiResult = get_api();
+      if (apiResult.ok) {
+        const res = await apiResult.val.get_component_metadata(username, activeComponentId);
+        if (res.ok) {
+          const meta = res.val;
+          let admin = false;
+          for (const group of Object.values(meta.access_control.groups)) {
+            const isMember = group.members.includes(username) || group.members.includes('PUBLIC');
+            if (isMember) {
+              if (group.permissions.includes('ComponentAdmin') || group.permissions.includes('AdminIssues')) {
+                admin = true;
+                break;
+              }
+            }
+          }
+          setCanAdmin(admin);
+        }
+      }
+    };
+    checkPerms();
+  }, [activeComponentId, username]);
 
   const sortedBugs = useMemo(() => {
     const sortableBugs = [...bugs];
@@ -181,8 +210,6 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username, search, onSe
   };
 
   const handleComponentClick = (id: number) => {
-    // Preserve other parts of the search if any? 
-    // Usually component navigation replaces the componentid filter.
     if (!search) {
       onSearch(`componentid:${id}`);
       return;
@@ -238,6 +265,15 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username, search, onSe
                   {activeComponent.id}: {activeComponent.name}
                 </Typography>
               </Box>
+            }
+            action={
+              canAdmin && (
+                <Tooltip title="Edit Component">
+                  <IconButton onClick={() => navigate(`/component/${activeComponent.id}`)}>
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )
             }
           />
           <Divider />
