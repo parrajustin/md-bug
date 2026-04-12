@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   AppBar, 
@@ -16,7 +16,9 @@ import {
   Menu, 
   MenuItem,
   IconButton,
-  Divider
+  Divider,
+  ButtonGroup,
+  Paper
 } from '@mui/material';
 import { styled, alpha } from '@mui/material/styles';
 import MenuIcon from '@mui/icons-material/Menu';
@@ -29,6 +31,8 @@ import NotificationImportantIcon from '@mui/icons-material/NotificationImportant
 import PeopleIcon from '@mui/icons-material/People';
 import HistoryIcon from '@mui/icons-material/History';
 import VerifiedIcon from '@mui/icons-material/Verified';
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
+import { get_api, type ComponentMetadata } from './api/api';
 
 const DRAWER_WIDTH = 250;
 
@@ -97,19 +101,78 @@ interface LayoutProps {
   onSignOut: () => void;
   searchValue: string;
   onSearch: (value: string) => void;
+  bugComponentId: number | null;
 }
 
-const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchValue, onSearch }) => {
+const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchValue, onSearch, bugComponentId }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [createMenuAnchorEl, setCreateMenuAnchorEl] = useState<null | HTMLElement>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(true);
   const [localSearch, setLocalSearch] = useState(searchValue);
+  
+  const [currentComponentMeta, setCurrentComponentMeta] = useState<ComponentMetadata | null>(null);
+  const [permissions, setPermissions] = useState<{ canCreateBug: boolean; isAdmin: boolean }>({
+    canCreateBug: false,
+    isAdmin: false,
+  });
 
-  // Sync local search state when the prop changes (e.g. from URL navigation)
-  React.useEffect(() => {
+  // Parse componentId from search or URL
+  const componentId = useMemo(() => {
+    // 1. Check if in bug view
+    if (location.pathname.startsWith('/issue/')) {
+      return bugComponentId;
+    }
+
+    // 2. Check if in component view (Home with componentid:)
+    if ((location.pathname === '/' || location.pathname === '/home') && searchValue) {
+      const match = searchValue.match(/componentid:(\d+)/i);
+      if (match) return parseInt(match[1]);
+    }
+    
+    return null;
+  }, [location.pathname, searchValue, bugComponentId]);
+
+  useEffect(() => {
     setLocalSearch(searchValue);
   }, [searchValue]);
+
+  useEffect(() => {
+    const fetchPerms = async () => {
+      if (componentId === null) {
+        setPermissions({ canCreateBug: false, isAdmin: false });
+        setCurrentComponentMeta(null);
+        return;
+      }
+
+      const apiResult = get_api();
+      if (apiResult.ok) {
+        const res = await apiResult.val.get_component_metadata(username, componentId);
+        if (res.ok) {
+          const meta = res.val;
+          setCurrentComponentMeta(meta);
+          
+          let canCreate = false;
+          let isAdmin = false;
+
+          for (const group of Object.values(meta.access_control.groups)) {
+            const isMember = group.members.includes(username) || group.members.includes('PUBLIC');
+            if (isMember) {
+              if (group.permissions.includes('CreateIssues')) canCreate = true;
+              if (group.permissions.includes('ComponentAdmin')) isAdmin = true;
+              if (group.permissions.includes('AdminIssues')) {
+                canCreate = true;
+                isAdmin = true;
+              }
+            }
+          }
+          setPermissions({ canCreateBug: canCreate, isAdmin });
+        }
+      }
+    };
+    fetchPerms();
+  }, [componentId, username]);
 
   const handleSearchSubmit = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
@@ -117,16 +180,8 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchVa
     }
   };
 
-  const handleMenu = (event: React.MouseEvent<HTMLElement>) => {
-    setAnchorEl(event.currentTarget);
-  };
-
-  const handleClose = () => {
-    setAnchorEl(null);
-  };
-
   const handleSignOut = () => {
-    handleClose();
+    setAnchorEl(null);
     onSignOut();
   };
 
@@ -145,6 +200,10 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchVa
     { text: 'Reported by me', icon: <HistoryIcon /> },
     { text: 'To be verified', icon: <VerifiedIcon /> },
   ];
+
+  const handleCreateMenuClose = () => {
+    setCreateMenuAnchorEl(null);
+  };
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', bgcolor: 'background.default' }}>
@@ -190,7 +249,7 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchVa
               />
             </Search>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }} onClick={handleMenu}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }} onClick={(e) => setAnchorEl(e.currentTarget)}>
             <Typography variant="body2" color="text.secondary">
               {username}
             </Typography>
@@ -200,7 +259,7 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchVa
             <Menu
               anchorEl={anchorEl}
               open={Boolean(anchorEl)}
-              onClose={handleClose}
+              onClose={() => setAnchorEl(null)}
               transformOrigin={{ horizontal: 'right', vertical: 'top' }}
               anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
             >
@@ -223,30 +282,99 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchVa
         }}
       >
         <Box sx={{ p: 2 }}>
-          <Button 
+          <ButtonGroup 
             variant="contained" 
             fullWidth 
-            startIcon={<AddIcon />}
-            onClick={() => navigate('/create_issue')}
             sx={{ 
-              borderRadius: '24px', 
-              py: 1.5,
-              fontWeight: 'bold',
+              borderRadius: '24px',
+              overflow: 'hidden',
+              boxShadow: 'none',
               bgcolor: 'primary.main',
-              '&:hover': {
-                bgcolor: '#2563eb'
+              '& .MuiButton-root': {
+                border: 'none',
+                py: 1.5,
+                '&:hover': {
+                  bgcolor: '#2563eb'
+                }
               }
             }}
           >
-            Create Issue
-          </Button>
+            <Button 
+              startIcon={<AddIcon />}
+              onClick={() => navigate('/create_issue')}
+              sx={{ 
+                flex: '0 0 80%', 
+                justifyContent: 'flex-start',
+                pl: 2.5,
+                fontWeight: 'bold',
+                textTransform: 'none',
+                borderRadius: '24px 0 0 24px !important'
+              }}
+            >
+              Create Issue
+            </Button>
+            <Box sx={{ width: '1px', bgcolor: 'rgba(255,255,255,0.3)', my: 1.5, zIndex: 1 }} />
+            <Button
+              size="small"
+              sx={{ 
+                flex: '0 0 20%', 
+                minWidth: 0,
+                p: 0, 
+                justifyContent: 'center',
+                borderRadius: '0 24px 24px 0 !important'
+              }}
+              onClick={(e) => setCreateMenuAnchorEl(e.currentTarget)}
+            >
+              <ArrowDropDownIcon />
+            </Button>
+          </ButtonGroup>
+          
+          <Menu
+            anchorEl={createMenuAnchorEl}
+            open={Boolean(createMenuAnchorEl)}
+            onClose={handleCreateMenuClose}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+            PaperProps={{
+              sx: { width: 218, mt: 0.5 }
+            }}
+          >
+            {/* 1) Create Issue in same component */}
+            {componentId !== null && permissions.canCreateBug && (
+              <MenuItem onClick={() => { navigate(`/create_issue?component_id=${componentId}`); handleCreateMenuClose(); }}>
+                <Typography variant="body2">Create issue in {currentComponentMeta?.name}</Typography>
+              </MenuItem>
+            )}
+            
+            {/* 2) Create Component - always visible */}
+            <MenuItem onClick={() => { navigate('/create_component'); handleCreateMenuClose(); }}>
+              <Typography variant="body2">Create Component</Typography>
+            </MenuItem>
+
+            {/* 3) Create Component in this component - only in component view context */}
+            {componentId !== null && permissions.isAdmin && location.pathname.startsWith('/issue/') === false && (
+              <MenuItem onClick={() => { navigate(`/create_component?parent_id=${componentId}`); handleCreateMenuClose(); }}>
+                <Typography variant="body2">Create Component in this component</Typography>
+              </MenuItem>
+            )}
+
+            {/* 4) Create bug template - only in component view context */}
+            {componentId !== null && permissions.isAdmin && location.pathname.startsWith('/issue/') === false && (
+              <MenuItem onClick={() => { handleCreateMenuClose(); /* Template creation view not yet implemented */ }}>
+                <Typography variant="body2">Create bug template</Typography>
+              </MenuItem>
+            )}
+          </Menu>
         </Box>
         <Divider />
         <List sx={{ px: 1 }}>
           {navItems.map((item) => (
             <ListItem key={item.text} disablePadding>
               <ListItemButton 
-                onClick={item.action || (item.path ? () => navigate(item.path!) : undefined)}
+                onClick={() => {
+                  if (item.action) item.action();
+                  else if (item.path) navigate(item.path);
+                }}
                 selected={item.path ? location.pathname === item.path : false}
                 sx={{ 
                   borderRadius: 1,

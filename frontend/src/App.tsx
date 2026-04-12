@@ -8,6 +8,7 @@ import { get_api, type Bug } from './api/api';
 import BugView from './BugView';
 import HomeView from './HomeView';
 import CreateIssueView from './CreateIssueView';
+import CreateComponentView from './CreateComponentView';
 import { type Result } from 'standard-ts-lib/src/result';
 import { StatusError } from 'standard-ts-lib/src/status_error';
 import { storage } from './api/storage';
@@ -19,9 +20,10 @@ interface BugLoaderProps {
   setResult: (result: Result<Bug, StatusError> | null) => void;
   username: string;
   onSearch: (query: string) => void;
+  onBugIdChange: (id: number | null) => void;
 }
 
-const BugLoader: React.FC<BugLoaderProps> = ({ currentResult, setResult, username, onSearch }) => {
+const BugLoader: React.FC<BugLoaderProps> = ({ currentResult, setResult, username, onSearch, onBugIdChange }) => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [loading, setLoading] = useState<boolean>(false);
@@ -29,6 +31,7 @@ const BugLoader: React.FC<BugLoaderProps> = ({ currentResult, setResult, usernam
   useEffect(() => {
     if (id) {
       const bugId = parseInt(id);
+      onBugIdChange(bugId);
       const apiResult = get_api();
       if (!apiResult.ok) {
         setResult(apiResult as any);
@@ -52,6 +55,8 @@ const BugLoader: React.FC<BugLoaderProps> = ({ currentResult, setResult, usernam
         // Not in state or different bug, fetch full bug
         fetchFullBug(api, bugId);
       }
+    } else {
+      onBugIdChange(null);
     }
   }, [id, username, currentResult, setResult]);
 
@@ -111,6 +116,7 @@ const App: React.FC = () => {
   const [bugResult, setBugResult] = useState<Result<Bug, StatusError> | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [checkingUsername, setCheckingUsername] = useState(true);
+  const [activeBugId, setActiveBugId] = useState<number | null>(null);
   
   const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
 
@@ -147,8 +153,6 @@ const App: React.FC = () => {
   };
 
   const handleSearch = (query: string) => {
-    // Navigate immediately to home with the query string.
-    // This updates the URL, which triggers the useEffect to update searchQuery state.
     if (query) {
       setSearchParams({ q: query });
     } else {
@@ -156,6 +160,8 @@ const App: React.FC = () => {
     }
     navigate(`/?${query ? 'q=' + encodeURIComponent(query) : ''}`);
   };
+
+  const componentIdFromBug = bugResult?.ok && activeBugId === bugResult.val.id ? bugResult.val.metadata.component_id : null;
 
   if (checkingUsername) {
     return (
@@ -182,12 +188,14 @@ const App: React.FC = () => {
         onSignOut={handleSignOut}
         searchValue={searchQuery}
         onSearch={handleSearch}
+        bugComponentId={componentIdFromBug}
       >
         <Routes>
           <Route path="/" element={<HomeView onBugSelect={handleBugClick} username={username} search={searchQuery} onSearch={handleSearch} />} />
           <Route path="/home" element={<HomeView onBugSelect={handleBugClick} username={username} search={searchQuery} onSearch={handleSearch} />} />
-          <Route path="/issue/:id" element={<BugLoader currentResult={bugResult} setResult={setBugResult} username={username} onSearch={handleSearch} />} />
+          <Route path="/issue/:id" element={<BugLoader currentResult={bugResult} setResult={setBugResult} username={username} onSearch={handleSearch} onBugIdChange={setActiveBugId} />} />
           <Route path="/create_issue" element={<CreateIssueView username={username} />} />
+          <Route path="/create_component" element={<CreateComponentView username={username} />} />
           <Route path="/login" element={<LoginView onLogin={handleLogin} />} />
         </Routes>
       </Layout>
