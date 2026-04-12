@@ -112,9 +112,7 @@ const App: React.FC = () => {
   const [username, setUsername] = useState<string | null>(null);
   const [checkingUsername, setCheckingUsername] = useState(true);
   
-  // Initialize searchQuery from URL
-  const initialQuery = searchParams.get('q') || '';
-  const [searchQuery, setSearchQuery] = useState(initialQuery);
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
 
   useEffect(() => {
     storage.getUsername().then(result => {
@@ -125,17 +123,13 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // Sync searchQuery back to URL when it changes
+  // Sync state FROM URL (handles browser back/forward)
   useEffect(() => {
     const q = searchParams.get('q') || '';
-    if (searchQuery !== q) {
-      if (searchQuery) {
-        setSearchParams({ q: searchQuery });
-      } else {
-        setSearchParams({});
-      }
+    if (q !== searchQuery) {
+      setSearchQuery(q);
     }
-  }, [searchQuery, searchParams, setSearchParams]);
+  }, [searchParams]);
 
   const handleBugClick = (id: number) => {
     navigate(`/issue/${id}`);
@@ -153,8 +147,14 @@ const App: React.FC = () => {
   };
 
   const handleSearch = (query: string) => {
-    setSearchQuery(query);
-    navigate('/');
+    // Navigate immediately to home with the query string.
+    // This updates the URL, which triggers the useEffect to update searchQuery state.
+    if (query) {
+      setSearchParams({ q: query });
+    } else {
+      setSearchParams({});
+    }
+    navigate(`/?${query ? 'q=' + encodeURIComponent(query) : ''}`);
   };
 
   if (checkingUsername) {
