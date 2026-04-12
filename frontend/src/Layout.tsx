@@ -106,6 +106,11 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchVa
   const [isDrawerOpen, setIsDrawerOpen] = useState(true);
   const [localSearch, setLocalSearch] = useState(searchValue);
 
+  // Sync local search state when the prop changes (e.g. from URL navigation)
+  React.useEffect(() => {
+    setLocalSearch(searchValue);
+  }, [searchValue]);
+
   const handleSearchSubmit = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       onSearch(localSearch);

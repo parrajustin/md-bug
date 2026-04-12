@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Routes, Route, useParams } from 'react-router-dom';
+import { useNavigate, Routes, Route, useParams, useSearchParams } from 'react-router-dom';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { theme } from './theme';
@@ -105,10 +105,14 @@ const BugLoader: React.FC<BugLoaderProps> = ({ currentResult, setResult, usernam
 
 const App: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [bugResult, setBugResult] = useState<Result<Bug, StatusError> | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [checkingUsername, setCheckingUsername] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+  
+  // Initialize searchQuery from URL
+  const initialQuery = searchParams.get('q') || '';
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
 
   useEffect(() => {
     storage.getUsername().then(result => {
@@ -118,6 +122,18 @@ const App: React.FC = () => {
       setCheckingUsername(false);
     });
   }, []);
+
+  // Sync searchQuery back to URL when it changes
+  useEffect(() => {
+    const q = searchParams.get('q') || '';
+    if (searchQuery !== q) {
+      if (searchQuery) {
+        setSearchParams({ q: searchQuery });
+      } else {
+        setSearchParams({});
+      }
+    }
+  }, [searchQuery, searchParams, setSearchParams]);
 
   const handleBugClick = (id: number) => {
     navigate(`/issue/${id}`);
@@ -132,6 +148,10 @@ const App: React.FC = () => {
     await storage.clearUsername();
     setUsername(null);
     navigate('/');
+  };
+
+  const handleSearch = (query: string) => {
+    setSearchQuery(query);
   };
 
   if (checkingUsername) {
@@ -158,11 +178,11 @@ const App: React.FC = () => {
         username={username} 
         onSignOut={handleSignOut}
         searchValue={searchQuery}
-        onSearch={setSearchQuery}
+        onSearch={handleSearch}
       >
         <Routes>
-          <Route path="/" element={<HomeView onBugSelect={handleBugClick} username={username} search={searchQuery} />} />
-          <Route path="/home" element={<HomeView onBugSelect={handleBugClick} username={username} search={searchQuery} />} />
+          <Route path="/" element={<HomeView onBugSelect={handleBugClick} username={username} search={searchQuery} onSearch={handleSearch} />} />
+          <Route path="/home" element={<HomeView onBugSelect={handleBugClick} username={username} search={searchQuery} onSearch={handleSearch} />} />
           <Route path="/issue/:id" element={<BugLoader currentResult={bugResult} setResult={setBugResult} username={username} />} />
           <Route path="/create_issue" element={<CreateIssueView username={username} />} />
           <Route path="/login" element={<LoginView onLogin={handleLogin} />} />

@@ -19,16 +19,19 @@ import {
   TableSortLabel,
   Paper,
   CircularProgress,
-  Tooltip
+  Tooltip,
+  Divider
 } from '@mui/material';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import FolderIcon from '@mui/icons-material/Folder';
 import { get_api, type BugSummary, type ComponentSummary } from './api/api';
 
 interface HomeViewProps {
   onBugSelect: (id: number) => void;
   username: string;
   search?: string;
+  onSearch: (query: string) => void;
 }
 
 type SortKey = keyof BugSummary;
@@ -50,7 +53,7 @@ interface VisibleColumns {
   last_updated_at: boolean;
 }
 
-const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username, search }) => {
+const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username, search, onSearch }) => {
   const [bugs, setBugs] = useState<BugSummary[]>([]);
   const [components, setComponents] = useState<ComponentSummary[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -71,6 +74,31 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username, search }) =>
   
   const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
   const [subMenuAnchorEl, setSubMenuAnchorEl] = useState<null | HTMLElement>(null);
+
+  // Parse componentid from search query
+  const activeComponentId = useMemo(() => {
+    if (!search) return null;
+    const match = search.match(/componentid:(\d+)/i);
+    return match ? parseInt(match[1]) : null;
+  }, [search]);
+
+  // Find the active component details
+  const activeComponent = useMemo(() => {
+    if (activeComponentId === null) return null;
+    return components.find(c => c.id === activeComponentId);
+  }, [activeComponentId, components]);
+
+  // Filter components to show only children if an active component is selected
+  const filteredComponents = useMemo(() => {
+    if (activeComponentId === null) {
+      // Show top-level components or everything? 
+      // Original logic showed everything. Let's keep it but maybe only show roots if requested?
+      // User said "show all components that are children to the currently selected component"
+      // implying if NOT selected, show roots.
+      return components.filter(c => c.parent_id === 0);
+    }
+    return components.filter(c => c.parent_id === activeComponentId);
+  }, [activeComponentId, components]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -152,6 +180,22 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username, search }) =>
     setSubMenuAnchorEl(event.currentTarget);
   };
 
+  const handleComponentClick = (id: number) => {
+    // Preserve other parts of the search if any? 
+    // Usually component navigation replaces the componentid filter.
+    if (!search) {
+      onSearch(`componentid:${id}`);
+      return;
+    }
+
+    if (search.toLowerCase().includes('componentid:')) {
+      const newSearch = search.replace(/componentid:\d+/i, `componentid:${id}`);
+      onSearch(newSearch);
+    } else {
+      onSearch(`${search} componentid:${id}`.trim());
+    }
+  };
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
@@ -183,9 +227,32 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username, search }) =>
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      {/* Component Details Card (Special View) */}
+      {activeComponent && (
+        <Card sx={{ borderLeft: 6, borderLeftColor: 'primary.main' }}>
+          <CardHeader 
+            title={
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                <FolderIcon color="primary" />
+                <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+                  {activeComponent.id}: {activeComponent.name}
+                </Typography>
+              </Box>
+            }
+          />
+          <Divider />
+          <CardContent>
+            <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', color: 'text.secondary' }}>
+              {activeComponent.description || "No description available for this component."}
+            </Typography>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Bugs List Card */}
       <Card>
         <CardHeader 
-          title="All Bugs"
+          title={activeComponent ? "Bugs in Component" : "All Bugs"}
           action={
             <Box>
               <IconButton onClick={handleMenuClick}>
@@ -283,25 +350,40 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username, search }) =>
         </CardContent>
       </Card>
 
+      {/* Components Card */}
       <Card>
-        <CardHeader title="Components" />
+        <CardHeader title={activeComponent ? "Sub-Components" : "Components"} />
         <CardContent>
-          {components.length === 0 && <Typography color="text.secondary">No components found.</Typography>}
+          {filteredComponents.length === 0 && <Typography color="text.secondary">No {activeComponent ? "sub-components" : "components"} found.</Typography>}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {components.map((comp) => (
+            {filteredComponents.map((comp) => (
               <Paper 
                 key={comp.id} 
                 variant="outlined"
+                onClick={() => handleComponentClick(comp.id)}
                 sx={{ 
                   p: 1.5, 
                   bgcolor: '#1e1e1e',
                   borderColor: 'divider',
-                  '&:hover': { bgcolor: '#252525' }
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 2,
+                  '&:hover': { 
+                    bgcolor: '#252525',
+                    borderColor: 'primary.main'
+                  }
                 }}
               >
-                <Typography variant="body2" color="text.secondary">
-                  {formatComponentPath(comp)}
-                </Typography>
+                <FolderIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                <Box>
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                    {comp.name}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {formatComponentPath(comp)}
+                  </Typography>
+                </Box>
               </Paper>
             ))}
           </Box>
