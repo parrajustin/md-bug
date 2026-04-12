@@ -108,6 +108,7 @@ const App: React.FC = () => {
   const [bugResult, setBugResult] = useState<Result<Bug, StatusError> | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [checkingUsername, setCheckingUsername] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     storage.getUsername().then(result => {
@@ -153,10 +154,15 @@ const App: React.FC = () => {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Layout username={username} onSignOut={handleSignOut}>
+      <Layout 
+        username={username} 
+        onSignOut={handleSignOut}
+        searchValue={searchQuery}
+        onSearch={setSearchQuery}
+      >
         <Routes>
-          <Route path="/" element={<HomeView onBugSelect={handleBugClick} username={username} />} />
-          <Route path="/home" element={<HomeView onBugSelect={handleBugClick} username={username} />} />
+          <Route path="/" element={<HomeView onBugSelect={handleBugClick} username={username} search={searchQuery} />} />
+          <Route path="/home" element={<HomeView onBugSelect={handleBugClick} username={username} search={searchQuery} />} />
           <Route path="/issue/:id" element={<BugLoader currentResult={bugResult} setResult={setBugResult} username={username} />} />
           <Route path="/create_issue" element={<CreateIssueView username={username} />} />
           <Route path="/login" element={<LoginView onLogin={handleLogin} />} />

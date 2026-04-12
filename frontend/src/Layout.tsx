@@ -95,13 +95,25 @@ interface LayoutProps {
   children: React.ReactNode;
   username: string;
   onSignOut: () => void;
+  searchValue: string;
+  onSearch: (value: string) => void;
 }
 
-const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut }) => {
+const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchValue, onSearch }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(true);
+  const [localSearch, setLocalSearch] = useState(searchValue);
+
+  const handleSearchSubmit = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      onSearch(localSearch);
+      if (location.pathname !== '/' && location.pathname !== '/home') {
+        navigate('/');
+      }
+    }
+  };
 
   const handleMenu = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -170,6 +182,9 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut }) => {
               <StyledInputBase
                 placeholder="Search bugs..."
                 inputProps={{ 'aria-label': 'search' }}
+                value={localSearch}
+                onChange={(e) => setLocalSearch(e.target.value)}
+                onKeyDown={handleSearchSubmit}
               />
             </Search>
           </Box>

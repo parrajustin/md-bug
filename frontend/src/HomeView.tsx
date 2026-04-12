@@ -28,6 +28,7 @@ import { get_api, type BugSummary, type ComponentSummary } from './api/api';
 interface HomeViewProps {
   onBugSelect: (id: number) => void;
   username: string;
+  search?: string;
 }
 
 type SortKey = keyof BugSummary;
@@ -49,7 +50,7 @@ interface VisibleColumns {
   last_updated_at: boolean;
 }
 
-const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username }) => {
+const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username, search }) => {
   const [bugs, setBugs] = useState<BugSummary[]>([]);
   const [components, setComponents] = useState<ComponentSummary[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -73,10 +74,11 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username }) => {
 
   useEffect(() => {
     const fetchData = async () => {
+      setLoading(true);
       const apiResult = get_api();
       if (apiResult.ok) {
         const [bugsResult, compsResult] = await Promise.all([
-          apiResult.val.get_bug_list(username),
+          apiResult.val.get_bug_list(username, search),
           apiResult.val.get_component_list(username)
         ]);
 
@@ -96,7 +98,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username }) => {
     };
 
     fetchData();
-  }, [username]);
+  }, [username, search]);
 
   const sortedBugs = useMemo(() => {
     const sortableBugs = [...bugs];

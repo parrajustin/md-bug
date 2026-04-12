@@ -20,6 +20,7 @@ use walkdir::WalkDir;
 
 use crate::bug_id_cache::BugIdCache;
 use crate::component_id_cache::ComponentIdCache;
+use crate::search_string::SearchString;
 
 pub const CURRENT_VERSION: u32 = 1;
 
@@ -81,7 +82,16 @@ pub trait HasVersion {
 }
 
 /// Represents a single user-defined metadata entry.
-#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Deserialize,
+    rkyv::Serialize,
+    SerdeSerialize,
+    SerdeDeserialize,
+    Clone,
+    Debug,
+    PartialEq,
+)]
 #[archive(check_bytes)]
 pub struct UserMetadataEntry {
     pub version: u32,
@@ -101,7 +111,16 @@ impl HasVersion for UserMetadataEntry {
 }
 
 /// Represents access control levels for a bug.
-#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Deserialize,
+    rkyv::Serialize,
+    SerdeSerialize,
+    SerdeDeserialize,
+    Clone,
+    Debug,
+    PartialEq,
+)]
 #[archive(check_bytes)]
 pub struct AccessMetadata {
     pub version: u32,
@@ -113,7 +132,16 @@ pub struct AccessMetadata {
     pub view_access: Vec<String>,
 }
 
-#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Deserialize,
+    rkyv::Serialize,
+    SerdeSerialize,
+    SerdeDeserialize,
+    Clone,
+    Debug,
+    PartialEq,
+)]
 #[archive(check_bytes)]
 pub enum Permission {
     ComponentAdmin,
@@ -124,7 +152,16 @@ pub enum Permission {
     ViewIssues,
 }
 
-#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Deserialize,
+    rkyv::Serialize,
+    SerdeSerialize,
+    SerdeDeserialize,
+    Clone,
+    Debug,
+    PartialEq,
+)]
 #[archive(check_bytes)]
 pub struct GroupPermissions {
     pub permissions: Vec<Permission>,
@@ -132,13 +169,33 @@ pub struct GroupPermissions {
     pub members: Vec<String>,
 }
 
-#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq, Default)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Deserialize,
+    rkyv::Serialize,
+    SerdeSerialize,
+    SerdeDeserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Default,
+)]
 #[archive(check_bytes)]
 pub struct AccessControl {
     pub groups: HashMap<String, GroupPermissions>,
 }
 
-#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq, Default)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Deserialize,
+    rkyv::Serialize,
+    SerdeSerialize,
+    SerdeDeserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Default,
+)]
 #[archive(check_bytes)]
 pub enum TemplateAccess {
     #[default]
@@ -148,7 +205,17 @@ pub enum TemplateAccess {
 }
 
 /// Represents a template for creating new bugs.
-#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq, Default)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Deserialize,
+    rkyv::Serialize,
+    SerdeSerialize,
+    SerdeDeserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Default,
+)]
 #[archive(check_bytes)]
 pub struct BugTemplate {
     pub name: String,
@@ -168,7 +235,16 @@ pub struct BugTemplate {
 }
 
 /// Represents metadata for a component (folder).
-#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Deserialize,
+    rkyv::Serialize,
+    SerdeSerialize,
+    SerdeDeserialize,
+    Clone,
+    Debug,
+    PartialEq,
+)]
 #[archive(check_bytes)]
 pub struct ComponentMetadata {
     pub version: u32,
@@ -186,7 +262,10 @@ pub struct ComponentMetadata {
     pub templates: HashMap<String, BugTemplate>,
     pub default_template: String,
     pub user_metadata: Vec<UserMetadataEntry>,
-    #[serde(serialize_with = "serialize_u64_as_string_n", deserialize_with = "deserialize_u64_from_string_n")]
+    #[serde(
+        serialize_with = "serialize_u64_as_string_n",
+        deserialize_with = "deserialize_u64_from_string_n"
+    )]
     pub created_at: u64,
 }
 
@@ -233,8 +312,10 @@ impl ComponentMetadata {
 
     pub fn has_permission(&self, username: &str, permission: &Permission) -> bool {
         for group in self.access_control.groups.values() {
-            if (group.members.contains(&username.to_string()) || group.members.contains(&"PUBLIC".to_string()))
-                && (group.permissions.contains(permission) || group.permissions.contains(&Permission::ComponentAdmin))
+            if (group.members.contains(&username.to_string())
+                || group.members.contains(&"PUBLIC".to_string()))
+                && (group.permissions.contains(permission)
+                    || group.permissions.contains(&Permission::ComponentAdmin))
             {
                 return true;
             }
@@ -245,22 +326,45 @@ impl ComponentMetadata {
     /// Merges this metadata with a child's metadata, with the child taking precedence.
     pub fn merge(&self, child: &ComponentMetadata) -> ComponentMetadata {
         let mut merged = self.clone();
-        if child.id > 0 { merged.id = child.id; }
-        if !child.name.is_empty() { merged.name = child.name.clone(); }
-        if !child.description.is_empty() { merged.description = child.description.clone(); }
-        if !child.creator.is_empty() { merged.creator = child.creator.clone(); }
-        if child.bug_type.is_some() { merged.bug_type = child.bug_type.clone(); }
-        if child.priority.is_some() { merged.priority = child.priority.clone(); }
-        if child.severity.is_some() { merged.severity = child.severity.clone(); }
-        if child.verifier.is_some() { merged.verifier = child.verifier.clone(); }
-        
-        if !child.collaborators.is_empty() { merged.collaborators = child.collaborators.clone(); }
-        if !child.cc.is_empty() { merged.cc = child.cc.clone(); }
-        
+        if child.id > 0 {
+            merged.id = child.id;
+        }
+        if !child.name.is_empty() {
+            merged.name = child.name.clone();
+        }
+        if !child.description.is_empty() {
+            merged.description = child.description.clone();
+        }
+        if !child.creator.is_empty() {
+            merged.creator = child.creator.clone();
+        }
+        if child.bug_type.is_some() {
+            merged.bug_type = child.bug_type.clone();
+        }
+        if child.priority.is_some() {
+            merged.priority = child.priority.clone();
+        }
+        if child.severity.is_some() {
+            merged.severity = child.severity.clone();
+        }
+        if child.verifier.is_some() {
+            merged.verifier = child.verifier.clone();
+        }
+
+        if !child.collaborators.is_empty() {
+            merged.collaborators = child.collaborators.clone();
+        }
+        if !child.cc.is_empty() {
+            merged.cc = child.cc.clone();
+        }
+
         // Merge access control: for now we'll just merge the groups map.
         // Child groups with same name overwrite parent groups.
         for (name, perms) in &child.access_control.groups {
-            merged.access_control.groups.insert(name.clone(), perms.clone());
+            merged
+                .access_control
+                .groups
+                .insert(name.clone(), perms.clone());
         }
 
         // Merge templates
@@ -271,9 +375,13 @@ impl ComponentMetadata {
             merged.default_template = child.default_template.clone();
         }
 
-        if !child.user_metadata.is_empty() { merged.user_metadata = child.user_metadata.clone(); }
-        if child.created_at > 0 { merged.created_at = child.created_at; }
-        
+        if !child.user_metadata.is_empty() {
+            merged.user_metadata = child.user_metadata.clone();
+        }
+        if child.created_at > 0 {
+            merged.created_at = child.created_at;
+        }
+
         merged
     }
 }
@@ -293,14 +401,21 @@ impl HasVersion for AccessMetadata {
 }
 
 impl BugMetadata {
-    pub fn access_level(&self, resolved_meta: &ComponentMetadata, username: &str) -> UserAccessLevel {
+    pub fn access_level(
+        &self,
+        resolved_meta: &ComponentMetadata,
+        username: &str,
+    ) -> UserAccessLevel {
         // 1. Check sovereign admins (AdminIssues or EditIssues)
         // Note: ComponentAdmin is for component management and doesn't grant bug access.
         // Note: Reporter doesn't have implicit access (they are added to full_access on creation).
         for group in resolved_meta.access_control.groups.values() {
-            if group.members.contains(&username.to_string()) || group.members.contains(&"PUBLIC".to_string()) {
-                if group.permissions.contains(&Permission::AdminIssues) ||
-                   group.permissions.contains(&Permission::EditIssues) {
+            if group.members.contains(&username.to_string())
+                || group.members.contains(&"PUBLIC".to_string())
+            {
+                if group.permissions.contains(&Permission::AdminIssues)
+                    || group.permissions.contains(&Permission::EditIssues)
+                {
                     return UserAccessLevel::Full;
                 }
             }
@@ -309,7 +424,9 @@ impl BugMetadata {
         let mut max_level = UserAccessLevel::None;
         // INHERIT from component (non-sovereign permissions)
         for group in resolved_meta.access_control.groups.values() {
-            if group.members.contains(&username.to_string()) || group.members.contains(&"PUBLIC".to_string()) {
+            if group.members.contains(&username.to_string())
+                || group.members.contains(&"PUBLIC".to_string())
+            {
                 // EditIssues moved to sovereign section above
                 if group.permissions.contains(&Permission::CommentOnIssues) {
                     max_level = std::cmp::max(max_level, UserAccessLevel::Comment);
@@ -321,13 +438,28 @@ impl BugMetadata {
         }
 
         // Check bug specific access.
-        if self.access.full_access.iter().any(|u| u == username || u == "PUBLIC") {
+        if self
+            .access
+            .full_access
+            .iter()
+            .any(|u| u == username || u == "PUBLIC")
+        {
             max_level = std::cmp::max(max_level, UserAccessLevel::Full);
         }
-        if self.access.comment_access.iter().any(|u| u == username || u == "PUBLIC") {
+        if self
+            .access
+            .comment_access
+            .iter()
+            .any(|u| u == username || u == "PUBLIC")
+        {
             max_level = std::cmp::max(max_level, UserAccessLevel::Comment);
         }
-        if self.access.view_access.iter().any(|u| u == username || u == "PUBLIC") {
+        if self
+            .access
+            .view_access
+            .iter()
+            .any(|u| u == username || u == "PUBLIC")
+        {
             max_level = std::cmp::max(max_level, UserAccessLevel::View);
         }
 
@@ -344,7 +476,16 @@ impl BugMetadata {
 }
 
 /// Contains all the core metadata for a bug.
-#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Deserialize,
+    rkyv::Serialize,
+    SerdeSerialize,
+    SerdeDeserialize,
+    Clone,
+    Debug,
+    PartialEq,
+)]
 #[archive(check_bytes)]
 pub struct BugMetadata {
     pub version: u32,
@@ -380,10 +521,16 @@ pub struct BugMetadata {
     /// Additional user-defined metadata entries.
     pub user_metadata: Vec<UserMetadataEntry>,
     /// Creation timestamp in epoch nanoseconds.
-    #[serde(serialize_with = "serialize_u64_as_string_n", deserialize_with = "deserialize_u64_from_string_n")]
+    #[serde(
+        serialize_with = "serialize_u64_as_string_n",
+        deserialize_with = "deserialize_u64_from_string_n"
+    )]
     pub created_at: u64,
     /// Incremental ID representing the state of the bug.
-    #[serde(serialize_with = "serialize_u64_as_string_n", deserialize_with = "deserialize_u64_from_string_n")]
+    #[serde(
+        serialize_with = "serialize_u64_as_string_n",
+        deserialize_with = "deserialize_u64_from_string_n"
+    )]
     pub state_id: u64,
 }
 
@@ -394,7 +541,16 @@ impl HasVersion for BugMetadata {
 }
 
 /// Represents a comment left on a bug.
-#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, SerdeSerialize, SerdeDeserialize, Clone, Debug, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Deserialize,
+    rkyv::Serialize,
+    SerdeSerialize,
+    SerdeDeserialize,
+    Clone,
+    Debug,
+    PartialEq,
+)]
 #[archive(check_bytes)]
 pub struct Comment {
     pub version: u32,
@@ -403,7 +559,10 @@ pub struct Comment {
     /// The user who authored the comment.
     pub author: String,
     /// Timestamp when the server received the comment.
-    #[serde(serialize_with = "serialize_u64_as_string_n", deserialize_with = "deserialize_u64_from_string_n")]
+    #[serde(
+        serialize_with = "serialize_u64_as_string_n",
+        deserialize_with = "deserialize_u64_from_string_n"
+    )]
     pub epoch_nanoseconds: u64,
     /// Markdown-formatted content of the comment.
     pub content: String,
@@ -439,9 +598,15 @@ pub struct BugSummary {
     pub severity: String,
     #[serde(rename = "type")]
     pub bug_type: String,
-    #[serde(serialize_with = "serialize_u64_as_string_n", deserialize_with = "deserialize_u64_from_string_n")]
+    #[serde(
+        serialize_with = "serialize_u64_as_string_n",
+        deserialize_with = "deserialize_u64_from_string_n"
+    )]
     pub created_at: u64,
-    #[serde(serialize_with = "serialize_u64_as_string_n", deserialize_with = "deserialize_u64_from_string_n")]
+    #[serde(
+        serialize_with = "serialize_u64_as_string_n",
+        deserialize_with = "deserialize_u64_from_string_n"
+    )]
     pub last_updated_at: u64,
 }
 
@@ -473,20 +638,33 @@ impl AppState {
     /// Gets or creates a mutex for a specific bug ID.
     pub fn get_bug_lock(&self, id: u32) -> Arc<tokio::sync::Mutex<()>> {
         let mut locks = self.bug_locks.lock().unwrap_or_else(|e| e.into_inner());
-        locks.entry(id).or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))).clone()
+        locks
+            .entry(id)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
     }
 
     /// Gets or creates a mutex for a specific component ID.
     pub fn get_component_lock(&self, id: u32) -> Arc<tokio::sync::Mutex<()>> {
-        let mut locks = self.component_locks.lock().unwrap_or_else(|e| e.into_inner());
-        locks.entry(id).or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))).clone()
+        let mut locks = self
+            .component_locks
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        locks
+            .entry(id)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
     }
 }
 
 /// Helper function to locate the directory path of a component given its ID using the cache.
 pub fn find_component_path(state: &AppState, id: u32) -> Option<PathBuf> {
     let cache = state.component_cache.lock().ok()?;
-    cache.get_path(id).map(|path| state.root.join(path.replace('/', std::path::MAIN_SEPARATOR_STR)))
+    cache.get_path(id).map(|path| {
+        state
+            .root
+            .join(path.replace('/', std::path::MAIN_SEPARATOR_STR))
+    })
 }
 
 /// Query parameters for searching bugs.
@@ -506,7 +684,7 @@ pub struct BugQuery {
 }
 
 /// Resolves the metadata for a component path by merging from root downwards.
-/// 
+///
 /// Process:
 /// 1. Start with an empty component metadata object.
 /// 2. Split the hierarchical path (e.g., "a/b/c") into individual components.
@@ -518,7 +696,7 @@ pub struct BugQuery {
 /// 5. Return the final merged metadata.
 pub fn resolve_component_metadata(root: &std::path::Path, path: &str) -> ComponentMetadata {
     let mut resolved = ComponentMetadata::empty();
-    
+
     let mut current_path = root.to_path_buf();
     let components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
 
@@ -555,14 +733,20 @@ pub struct CreateComponentRequest {
 /// Helper to sanitize names for filesystem use.
 pub fn sanitize_name(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
-/// Creates a new component. 
+/// Creates a new component.
 /// NOTE: Creating components at the root level via the API is STRICTLY FORBIDDEN.
 /// NO BOOTSTRAP LOGIC IS ALLOWED. ROOT COMPONENTS ARE MANUAL ONLY.
-/// 
+///
 /// Process:
 /// 1. Resolve the parent's hierarchical path using the `parent_id` and the component cache.
 /// 2. Verify that the parent directory exists on disk.
@@ -584,7 +768,7 @@ pub async fn create_component(
     Json(payload): Json<CreateComponentRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // 1. Resolve parent path
-    // STRICT MANDATE: Root component creation via API is FORBIDDEN. 
+    // STRICT MANDATE: Root component creation via API is FORBIDDEN.
     // parent_id 0 represents the root, and we must never allow creating children of root via API.
     if payload.parent_id == 0 {
         return Err(StatusCode::FORBIDDEN);
@@ -592,8 +776,12 @@ pub async fn create_component(
 
     let (parent_path_str, parent_path) = {
         let cache = state.component_cache.lock().unwrap();
-        let path_str = cache.get_path(payload.parent_id).ok_or(StatusCode::NOT_FOUND)?;
-        let path = state.root.join(path_str.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let path_str = cache
+            .get_path(payload.parent_id)
+            .ok_or(StatusCode::NOT_FOUND)?;
+        let path = state
+            .root
+            .join(path_str.replace('/', std::path::MAIN_SEPARATOR_STR));
         (path_str, path)
     };
 
@@ -604,7 +792,7 @@ pub async fn create_component(
 
     // 3. Resolve parent metadata for permission check
     let parent_meta = resolve_component_metadata(&state.root, &parent_path_str);
-    
+
     // 4. Check authorization
     let is_authorized = parent_meta.has_permission(&payload.u, &Permission::ComponentAdmin);
     if !is_authorized {
@@ -641,44 +829,63 @@ pub async fn create_component(
 
     // 9. Setup access control (inheriting from parent)
     let mut groups = parent_meta.access_control.groups.clone();
-    
+
     // 10. Ensure creator is Admin
-    let admins = groups.entry("Component Admins".to_string()).or_insert_with(|| GroupPermissions {
-        permissions: vec![
-            Permission::ComponentAdmin, Permission::CreateIssues, Permission::AdminIssues,
-            Permission::EditIssues, Permission::CommentOnIssues, Permission::ViewIssues
-        ],
-        view_level: 999,
-        members: vec![],
-    });
+    let admins = groups
+        .entry("Component Admins".to_string())
+        .or_insert_with(|| GroupPermissions {
+            permissions: vec![
+                Permission::ComponentAdmin,
+                Permission::CreateIssues,
+                Permission::AdminIssues,
+                Permission::EditIssues,
+                Permission::CommentOnIssues,
+                Permission::ViewIssues,
+            ],
+            view_level: 999,
+            members: vec![],
+        });
     if !admins.members.contains(&payload.u) {
         admins.members.push(payload.u.clone());
     }
 
     // Ensure standard groups exist
-    groups.entry("Issue Admins".to_string()).or_insert_with(|| GroupPermissions {
-        permissions: vec![
-            Permission::CreateIssues, Permission::AdminIssues,
-            Permission::EditIssues, Permission::CommentOnIssues, Permission::ViewIssues
-        ],
-        view_level: 500,
-        members: vec![],
-    });
-    groups.entry("Issue Editors".to_string()).or_insert_with(|| GroupPermissions {
-        permissions: vec![
-            Permission::CreateIssues, Permission::EditIssues, 
-            Permission::CommentOnIssues, Permission::ViewIssues
-        ],
-        view_level: 100,
-        members: vec![],
-    });
-    groups.entry("Issue Contributors".to_string()).or_insert_with(|| GroupPermissions {
-        permissions: vec![
-            Permission::CreateIssues, Permission::CommentOnIssues, Permission::ViewIssues
-        ],
-        view_level: 1,
-        members: vec!["PUBLIC".to_string()],
-    });
+    groups
+        .entry("Issue Admins".to_string())
+        .or_insert_with(|| GroupPermissions {
+            permissions: vec![
+                Permission::CreateIssues,
+                Permission::AdminIssues,
+                Permission::EditIssues,
+                Permission::CommentOnIssues,
+                Permission::ViewIssues,
+            ],
+            view_level: 500,
+            members: vec![],
+        });
+    groups
+        .entry("Issue Editors".to_string())
+        .or_insert_with(|| GroupPermissions {
+            permissions: vec![
+                Permission::CreateIssues,
+                Permission::EditIssues,
+                Permission::CommentOnIssues,
+                Permission::ViewIssues,
+            ],
+            view_level: 100,
+            members: vec![],
+        });
+    groups
+        .entry("Issue Contributors".to_string())
+        .or_insert_with(|| GroupPermissions {
+            permissions: vec![
+                Permission::CreateIssues,
+                Permission::CommentOnIssues,
+                Permission::ViewIssues,
+            ],
+            view_level: 1,
+            members: vec!["PUBLIC".to_string()],
+        });
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -691,7 +898,9 @@ pub async fn create_component(
     let (new_id, _relative_path_str) = {
         let mut cache = state.component_cache.lock().unwrap();
         let id = cache.get_next_id();
-        let rel_path = component_path.strip_prefix(&state.root).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let rel_path = component_path
+            .strip_prefix(&state.root)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         let rel_path_str = rel_path.to_string_lossy().replace('\\', "/");
         cache.insert(id, rel_path_str.clone());
         (id, rel_path_str)
@@ -719,7 +928,8 @@ pub async fn create_component(
 
     // 14. Persist to disk
     let bytes = rkyv::to_bytes::<_, 2048>(&meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    fs::write(component_path.join("component_metadata"), bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    fs::write(component_path.join("component_metadata"), bytes)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::CREATED)
 }
@@ -743,7 +953,7 @@ pub struct CreateBugRequest {
 }
 
 /// Creates a new bug in a component.
-/// 
+///
 /// Process:
 /// 1. Resolve the component path using the `component_id`.
 /// 2. Verify the component exists.
@@ -764,8 +974,12 @@ pub async fn create_bug(
     // 1 & 2. Resolve component path
     let (component_path_str, component_path) = {
         let cache = state.component_cache.lock().unwrap();
-        let path_str = cache.get_path(payload.component_id).ok_or(StatusCode::NOT_FOUND)?;
-        let path = state.root.join(path_str.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let path_str = cache
+            .get_path(payload.component_id)
+            .ok_or(StatusCode::NOT_FOUND)?;
+        let path = state
+            .root
+            .join(path_str.replace('/', std::path::MAIN_SEPARATOR_STR));
         (path_str, path)
     };
 
@@ -782,12 +996,21 @@ pub async fn create_bug(
     }
 
     // 5. Get template, if it doesn't exist fail.
-    let template = component_meta.templates.get(&payload.template_name)
+    let template = component_meta
+        .templates
+        .get(&payload.template_name)
         .ok_or(StatusCode::BAD_REQUEST)?;
 
     // 6. Generate ID
     let new_id = state.bug_cache.get_next_bug_id();
-    state.bug_cache.insert_bug(new_id as u64, component_path_str.split('/').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect());
+    state.bug_cache.insert_bug(
+        new_id as u64,
+        component_path_str
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect(),
+    );
     let _ = state.bug_cache.save(&state.root);
 
     // 7. Initialize metadata
@@ -801,31 +1024,77 @@ pub async fn create_bug(
     access.full_access.push(payload.u.clone());
 
     match template.default_access {
-        TemplateAccess::Default => {},
+        TemplateAccess::Default => {}
         TemplateAccess::LimitedComment => {
             access.comment_access.push("PUBLIC".to_string());
-        },
+        }
         TemplateAccess::LimitedView => {
             access.view_access.push("PUBLIC".to_string());
-        },
+        }
     }
 
     let metadata = BugMetadata {
         version: CURRENT_VERSION,
         id: new_id,
         reporter: payload.u.clone(),
-        bug_type: payload.bug_type.or(template.bug_type.clone()).unwrap_or_else(|| component_meta.bug_type.clone().unwrap_or_else(|| "Bug".to_string())),
-        priority: payload.priority.or(template.priority.clone()).unwrap_or_else(|| component_meta.priority.clone().unwrap_or_else(|| "P2".to_string())),
-        severity: payload.severity.or(template.severity.clone()).unwrap_or_else(|| component_meta.severity.clone().unwrap_or_else(|| "S2".to_string())),
+        bug_type: payload
+            .bug_type
+            .or(template.bug_type.clone())
+            .unwrap_or_else(|| {
+                component_meta
+                    .bug_type
+                    .clone()
+                    .unwrap_or_else(|| "Bug".to_string())
+            }),
+        priority: payload
+            .priority
+            .or(template.priority.clone())
+            .unwrap_or_else(|| {
+                component_meta
+                    .priority
+                    .clone()
+                    .unwrap_or_else(|| "P2".to_string())
+            }),
+        severity: payload
+            .severity
+            .or(template.severity.clone())
+            .unwrap_or_else(|| {
+                component_meta
+                    .severity
+                    .clone()
+                    .unwrap_or_else(|| "S2".to_string())
+            }),
         status: "New".to_string(),
-        assignee: payload.assignee.or(template.assignee.clone()).unwrap_or_default(),
-        verifier: payload.verifier.or(template.verifier.clone()).unwrap_or_else(|| component_meta.verifier.clone().unwrap_or_default()),
-        collaborators: if !payload.collaborators.is_empty() { payload.collaborators.clone() } else { template.collaborators.clone() },
-        cc: if !payload.cc.is_empty() { payload.cc.clone() } else { template.cc.clone() },
+        assignee: payload
+            .assignee
+            .or(template.assignee.clone())
+            .unwrap_or_default(),
+        verifier: payload
+            .verifier
+            .or(template.verifier.clone())
+            .unwrap_or_else(|| component_meta.verifier.clone().unwrap_or_default()),
+        collaborators: if !payload.collaborators.is_empty() {
+            payload.collaborators.clone()
+        } else {
+            template.collaborators.clone()
+        },
+        cc: if !payload.cc.is_empty() {
+            payload.cc.clone()
+        } else {
+            template.cc.clone()
+        },
         access,
-        title: if payload.title.is_empty() { template.title.clone() } else { payload.title.clone() },
+        title: if payload.title.is_empty() {
+            template.title.clone()
+        } else {
+            payload.title.clone()
+        },
         component_id: payload.component_id,
-        description: if payload.description.is_empty() { template.description.clone() } else { payload.description.clone() },
+        description: if payload.description.is_empty() {
+            template.description.clone()
+        } else {
+            payload.description.clone()
+        },
         user_metadata: vec![],
         created_at,
         state_id: 1,
@@ -836,7 +1105,8 @@ pub async fn create_bug(
     fs::create_dir_all(&bug_dir).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // 10. Persist metadata
-    let bytes = rkyv::to_bytes::<_, 8192>(&metadata).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let bytes =
+        rkyv::to_bytes::<_, 8192>(&metadata).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     fs::write(bug_dir.join("metadata"), bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(new_id))
@@ -850,7 +1120,7 @@ pub struct TemplateRequest {
 }
 
 /// Adds a new template to a component.
-/// 
+///
 /// Process:
 /// 1. Acquire a mutex for the component to prevent race conditions during template modifications.
 /// 2. Resolve the component's path on disk using its ID.
@@ -879,7 +1149,8 @@ pub async fn add_template(
 
     // 3. Read metadata
     let data = fs::read(&meta_file).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // 4. Permission check
     if !meta.has_permission(&payload.u, &Permission::ComponentAdmin) {
@@ -888,7 +1159,7 @@ pub async fn add_template(
 
     // 5. Validation
     if payload.template.name.is_empty() {
-        return Err(StatusCode::BAD_REQUEST); 
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     // 6. Duplicate check
@@ -897,7 +1168,8 @@ pub async fn add_template(
     }
 
     // 7. Update metadata
-    meta.templates.insert(payload.template.name.clone(), payload.template);
+    meta.templates
+        .insert(payload.template.name.clone(), payload.template);
 
     // 8. Persist
     let bytes = rkyv::to_bytes::<_, 2048>(&meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -915,7 +1187,7 @@ pub struct ModifyTemplateRequest {
 }
 
 /// Modifies an existing template.
-/// 
+///
 /// Process:
 /// 1. Acquire component lock.
 /// 2. Resolve component path and read its metadata.
@@ -937,7 +1209,8 @@ pub async fn modify_template(
     let meta_file = component_path.join("component_metadata");
 
     let data = fs::read(&meta_file).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if !meta.has_permission(&payload.u, &Permission::ComponentAdmin) {
         return Err(StatusCode::FORBIDDEN);
@@ -952,12 +1225,15 @@ pub async fn modify_template(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    if payload.old_name != payload.template.name && meta.templates.contains_key(&payload.template.name) {
+    if payload.old_name != payload.template.name
+        && meta.templates.contains_key(&payload.template.name)
+    {
         return Err(StatusCode::CONFLICT);
     }
 
     meta.templates.remove(&payload.old_name);
-    meta.templates.insert(payload.template.name.clone(), payload.template);
+    meta.templates
+        .insert(payload.template.name.clone(), payload.template);
 
     let bytes = rkyv::to_bytes::<_, 2048>(&meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     fs::write(&meta_file, bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -973,7 +1249,7 @@ pub struct DeleteTemplateRequest {
 }
 
 /// Deletes a template from a component.
-/// 
+///
 /// Process:
 /// 1. Acquire component lock.
 /// 2. Resolve component path and read its metadata.
@@ -993,7 +1269,8 @@ pub async fn delete_template(
     let meta_file = component_path.join("component_metadata");
 
     let data = fs::read(&meta_file).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if !meta.has_permission(&payload.u, &Permission::ComponentAdmin) {
         return Err(StatusCode::FORBIDDEN);
@@ -1012,7 +1289,6 @@ pub async fn delete_template(
 
     Ok(StatusCode::OK)
 }
-
 
 /// Request payload for updating component metadata.
 #[derive(SerdeDeserialize)]
@@ -1041,7 +1317,8 @@ pub async fn update_component_metadata(
 
     // 3. Read old metadata for permission check
     let data = fs::read(&meta_file).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let old_meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let old_meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // 4. Permission check (only ComponentAdmin can update metadata)
     if !old_meta.has_permission(&payload.u, &Permission::ComponentAdmin) {
@@ -1054,14 +1331,15 @@ pub async fn update_component_metadata(
     }
 
     // 6. Persist updated metadata
-    let bytes = rkyv::to_bytes::<_, 4096>(&payload.metadata).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let bytes = rkyv::to_bytes::<_, 4096>(&payload.metadata)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     fs::write(&meta_file, bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::OK)
 }
 
 /// Retrieves the resolved metadata for a specific component.
-/// 
+///
 /// Process:
 /// 1. Resolve the hierarchical path string from the component cache using the ID.
 /// 2. Call `resolve_component_metadata` to merge metadata from root down to this path.
@@ -1076,11 +1354,11 @@ pub async fn get_component_metadata(
         cache.get_path(id).ok_or(StatusCode::NOT_FOUND)?
     };
     let resolved = resolve_component_metadata(&state.root, &path);
-    
+
     if !resolved.has_permission(&query.u, &Permission::ViewIssues) {
         return Err(StatusCode::FORBIDDEN);
     }
-    
+
     Ok(Json(resolved))
 }
 
@@ -1111,20 +1389,32 @@ pub async fn get_component_list(
         }
 
         // Get this component's specific metadata (non-resolved for name/description)
-        let component_path = state.root.join(path_str.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let component_path = state
+            .root
+            .join(path_str.replace('/', std::path::MAIN_SEPARATOR_STR));
         let meta_file = component_path.join("component_metadata");
 
         let (name, description) = if let Ok(data) = fs::read(&meta_file) {
             if let Ok(meta) = read_versioned::<ComponentMetadata>(&data) {
                 (meta.name, meta.description)
             } else {
-                (path_str.split('/').last().unwrap_or("").to_string(), "".to_string())
+                (
+                    path_str.split('/').last().unwrap_or("").to_string(),
+                    "".to_string(),
+                )
             }
         } else {
-            (path_str.split('/').last().unwrap_or("").to_string(), "".to_string())
+            (
+                path_str.split('/').last().unwrap_or("").to_string(),
+                "".to_string(),
+            )
         };
 
-        let mut folders: Vec<String> = path_str.split('/').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect();
+        let mut folders: Vec<String> = path_str
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
         // Remove self from folders
         if !folders.is_empty() {
             folders.pop();
@@ -1160,22 +1450,97 @@ pub async fn get_component_list(
 
     Json(summaries)
 }
+
+fn match_condition(key: &str, values: &[String], metadata: &BugMetadata, is_exclude: bool) -> bool {
+    let field_value = match key.to_lowercase().as_str() {
+        "id" => metadata.id.to_string(),
+        "status" => metadata.status.clone(),
+        "priority" => metadata.priority.clone(),
+        "severity" => metadata.severity.clone(),
+        "type" => metadata.bug_type.clone(),
+        "assignee" => metadata.assignee.clone(),
+        "reporter" => metadata.reporter.clone(),
+        "componentid" => metadata.component_id.to_string(),
+        _ => return !is_exclude, // Unknown fields don't match, so include fails, exclude passes (not excluded)
+    };
+
+    for val in values {
+        // Support regex if val starts and ends with /
+        if val.starts_with('/') && val.ends_with('/') && val.len() > 2 {
+            let pattern = &val[1..val.len() - 1];
+            if let Ok(re) = regex::RegexBuilder::new(pattern)
+                .case_insensitive(true)
+                .build()
+            {
+                if re.is_match(&field_value) {
+                    return true;
+                }
+            }
+        } else if field_value.to_lowercase().contains(&val.to_lowercase()) {
+            return true;
+        }
+    }
+
+    false
+}
+
+// Checks if the bug metadata matches the parsed search string.
+fn match_entry(search_query: &SearchString, metadata: &BugMetadata) -> bool {
+    let parsed_query = search_query.get_parsed_query();
+
+    // First check all the text segments in the search query.
+    for text_segment in &search_query.text_segments {
+        let mut found_text_entries: bool = false;
+        if metadata
+            .description
+            .to_lowercase()
+            .contains(&text_segment.text)
+            ^ text_segment.negated
+        {
+            found_text_entries = true;
+        } else if metadata.title.to_lowercase().contains(&text_segment.text) ^ text_segment.negated
+        {
+            found_text_entries = true;
+        }
+        if !found_text_entries {
+            return false;
+        }
+    }
+    // TODO: Add check for text within comments.
+
+    for (key, values) in &parsed_query.include {
+        if !match_condition(key, values, &metadata, false) {
+            return false;
+        }
+    }
+
+    for (key, values) in &parsed_query.exclude {
+        if match_condition(key, values, &metadata, true) {
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Retrieves a list of bugs matching the search criteria.
-/// 
+///
 /// Process:
 /// 1. Recursively scan the root for files named "metadata".
 /// 2. For each metadata file:
 ///    a. Deserialize the `BugMetadata`.
 ///    b. Check if the requesting user has at least `View` access.
-///    c. If a search query `q` is provided, match it against the title, assignee, and reporter (case-insensitive).
-///    d. If it matches, add a `BugSummary` to the result list.
+///    c. Parse the search query `q` into `SearchString`.
+///    d. Match conditions and text segments against metadata.
+///    e. If it matches, add a `BugSummary` to the result list.
 /// 3. Return the collected summaries as JSON.
 pub async fn get_bug_list(
     State(state): State<Arc<AppState>>,
     Query(query): Query<SearchQuery>,
 ) -> impl IntoResponse {
     let mut summaries = Vec::new();
-    let q = query.q.unwrap_or_default().to_lowercase();
+    let q_str = query.q.unwrap_or_default();
+    let search_query: SearchString = SearchString::parse(&q_str);
     let u = query.u;
 
     for entry in WalkDir::new(&state.root)
@@ -1187,12 +1552,12 @@ pub async fn get_bug_list(
             Ok(d) => d,
             Err(_) => continue,
         };
-        
+
         let metadata: BugMetadata = match read_versioned::<BugMetadata>(&data) {
             Ok(m) => m,
             Err(_) => continue,
         };
-        
+
         // Check view access
         let component_path = {
             let cache = state.component_cache.lock().unwrap();
@@ -1204,17 +1569,15 @@ pub async fn get_bug_list(
             continue;
         }
 
-        let matches = q.is_empty() 
-            || metadata.title.to_lowercase().contains(&q)
-            || metadata.assignee.to_lowercase().contains(&q)
-            || metadata.reporter.to_lowercase().contains(&q);
-
-        if matches {
+        if search_query.is_empty() || match_entry(&search_query, &metadata) {
             let last_updated_at = fs::metadata(entry.path())
                 .and_then(|m| m.modified())
-                .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64)
+                .map(|t| {
+                    t.duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos() as u64
+                })
                 .unwrap_or(metadata.created_at);
-
             summaries.push(BugSummary {
                 id: metadata.id,
                 title: metadata.title.clone(),
@@ -1231,9 +1594,8 @@ pub async fn get_bug_list(
 
     Json(summaries)
 }
-
 /// Retrieves the full details of a specific bug by its ID.
-/// 
+///
 /// Process:
 /// 1. Locate the bug's directory using the bug ID cache.
 /// 2. Read and deserialize the "metadata" file.
@@ -1247,17 +1609,18 @@ pub async fn get_bug(
     Path(id): Path<u32>,
     Query(query): Query<BugQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let bug_path = find_bug_path(&state, id)
-        .ok_or(StatusCode::NOT_FOUND)?;
+    let bug_path = find_bug_path(&state, id).ok_or(StatusCode::NOT_FOUND)?;
 
-    let metadata_data = fs::read(bug_path.join("metadata"))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let metadata_data =
+        fs::read(bug_path.join("metadata")).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let metadata: BugMetadata = read_versioned::<BugMetadata>(&metadata_data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let (resolved_meta, folders, folder_ids) = {
         let component_cache = state.component_cache.lock().unwrap();
-        let path = component_cache.get_path(metadata.component_id).unwrap_or_default();
+        let path = component_cache
+            .get_path(metadata.component_id)
+            .unwrap_or_default();
         let mut folders = Vec::new();
         let mut folder_ids = Vec::new();
         let mut current_path = String::new();
@@ -1271,7 +1634,11 @@ pub async fn get_bug(
                 folder_ids.push(id);
             }
         }
-        (resolve_component_metadata(&state.root, &path), folders, folder_ids)
+        (
+            resolve_component_metadata(&state.root, &path),
+            folders,
+            folder_ids,
+        )
     };
 
     if metadata.access_level(&resolved_meta, &query.u) < UserAccessLevel::View {
@@ -1317,17 +1684,18 @@ pub async fn get_bug_state(
     Path(id): Path<u32>,
     Query(query): Query<BugQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let bug_path = find_bug_path(&state, id)
-        .ok_or(StatusCode::NOT_FOUND)?;
+    let bug_path = find_bug_path(&state, id).ok_or(StatusCode::NOT_FOUND)?;
 
-    let metadata_data = fs::read(bug_path.join("metadata"))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let metadata_data =
+        fs::read(bug_path.join("metadata")).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let metadata: BugMetadata = read_versioned::<BugMetadata>(&metadata_data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let resolved_meta = {
         let component_cache = state.component_cache.lock().unwrap();
-        let path = component_cache.get_path(metadata.component_id).unwrap_or_default();
+        let path = component_cache
+            .get_path(metadata.component_id)
+            .unwrap_or_default();
         resolve_component_metadata(&state.root, &path)
     };
 
@@ -1335,7 +1703,9 @@ pub async fn get_bug_state(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    Ok(Json(BugStateResponse { state_id: metadata.state_id }))
+    Ok(Json(BugStateResponse {
+        state_id: metadata.state_id,
+    }))
 }
 
 /// Request payload for submitting a new comment.
@@ -1356,7 +1726,7 @@ pub struct SubmitCommentResponse {
 }
 
 /// Submits a new comment to an existing bug.
-/// 
+///
 /// Process:
 /// 1. Acquire the bug-specific mutex to synchronize updates.
 /// 2. Locate the bug's directory and read its metadata.
@@ -1373,18 +1743,18 @@ pub async fn submit_comment(
 ) -> Result<impl IntoResponse, StatusCode> {
     let lock = state.get_bug_lock(id);
     let _guard = lock.lock().await;
-    let bug_path = find_bug_path(&state, id)
-        .ok_or(StatusCode::NOT_FOUND)?;
+    let bug_path = find_bug_path(&state, id).ok_or(StatusCode::NOT_FOUND)?;
 
     let metadata_file = bug_path.join("metadata");
-    let data = fs::read(&metadata_file)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut metadata: BugMetadata = read_versioned::<BugMetadata>(&data)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let data = fs::read(&metadata_file).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut metadata: BugMetadata =
+        read_versioned::<BugMetadata>(&data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let resolved_meta = {
         let component_cache = state.component_cache.lock().unwrap();
-        let path = component_cache.get_path(metadata.component_id).unwrap_or_default();
+        let path = component_cache
+            .get_path(metadata.component_id)
+            .unwrap_or_default();
         resolve_component_metadata(&state.root, &path)
     };
 
@@ -1394,10 +1764,9 @@ pub async fn submit_comment(
 
     metadata.state_id += 1;
     let new_state_id = metadata.state_id;
-    let bytes = rkyv::to_bytes::<_, 1024>(&metadata)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    fs::write(&metadata_file, bytes)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let bytes =
+        rkyv::to_bytes::<_, 1024>(&metadata).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    fs::write(&metadata_file, bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let next_comment_id = state.bug_cache.get_next_comment_id(id as u64);
     let _ = state.bug_cache.save(&state.root);
@@ -1414,10 +1783,13 @@ pub async fn submit_comment(
         content: payload.content,
     };
 
-    let bytes = rkyv::to_bytes::<_, 256>(&comment)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    fs::write(bug_path.join(format!("comment_{:07}", next_comment_id)), bytes)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let bytes =
+        rkyv::to_bytes::<_, 256>(&comment).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    fs::write(
+        bug_path.join(format!("comment_{:07}", next_comment_id)),
+        bytes,
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(SubmitCommentResponse {
         comment_id: next_comment_id,
@@ -1442,7 +1814,7 @@ pub struct ChangeMetadataResponse {
 }
 
 /// Updates a metadata field for a specific bug.
-/// 
+///
 /// Process:
 /// 1. Acquire bug lock.
 /// 2. Locate bug and read metadata.
@@ -1459,18 +1831,18 @@ pub async fn update_bug_metadata(
 ) -> Result<impl IntoResponse, StatusCode> {
     let lock = state.get_bug_lock(id);
     let _guard = lock.lock().await;
-    let bug_path = find_bug_path(&state, id)
-        .ok_or(StatusCode::NOT_FOUND)?;
+    let bug_path = find_bug_path(&state, id).ok_or(StatusCode::NOT_FOUND)?;
 
     let metadata_file = bug_path.join("metadata");
-    let data = fs::read(&metadata_file)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut metadata: BugMetadata = read_versioned::<BugMetadata>(&data)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let data = fs::read(&metadata_file).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut metadata: BugMetadata =
+        read_versioned::<BugMetadata>(&data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let resolved_meta = {
         let component_cache = state.component_cache.lock().unwrap();
-        let path = component_cache.get_path(metadata.component_id).unwrap_or_default();
+        let path = component_cache
+            .get_path(metadata.component_id)
+            .unwrap_or_default();
         resolve_component_metadata(&state.root, &path)
     };
 
@@ -1486,14 +1858,53 @@ pub async fn update_bug_metadata(
         "type" => metadata.bug_type = payload.value,
         "title" => metadata.title = payload.value,
         "description" => metadata.description = payload.value,
-        "collaborators" => metadata.collaborators = payload.value.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
-        "cc" => metadata.cc = payload.value.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+        "collaborators" => {
+            metadata.collaborators = payload
+                .value
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        }
+        "cc" => {
+            metadata.cc = payload
+                .value
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        }
         "verifier" => metadata.verifier = payload.value,
-        "full_access" => metadata.access.full_access = payload.value.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
-        "comment_access" => metadata.access.comment_access = payload.value.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
-        "view_access" => metadata.access.view_access = payload.value.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+        "full_access" => {
+            metadata.access.full_access = payload
+                .value
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        }
+        "comment_access" => {
+            metadata.access.comment_access = payload
+                .value
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        }
+        "view_access" => {
+            metadata.access.view_access = payload
+                .value
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        }
         _ => {
-            if let Some(entry) = metadata.user_metadata.iter_mut().find(|m| m.key == payload.field) {
+            if let Some(entry) = metadata
+                .user_metadata
+                .iter_mut()
+                .find(|m| m.key == payload.field)
+            {
                 entry.value = payload.value;
             } else {
                 metadata.user_metadata.push(UserMetadataEntry {
@@ -1509,10 +1920,9 @@ pub async fn update_bug_metadata(
     metadata.state_id += 1;
     let new_state_id = metadata.state_id;
 
-    let bytes = rkyv::to_bytes::<_, 1024>(&metadata)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    fs::write(metadata_file, bytes)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let bytes =
+        rkyv::to_bytes::<_, 1024>(&metadata).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    fs::write(metadata_file, bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(ChangeMetadataResponse {
         state_id: new_state_id,
@@ -1530,12 +1940,11 @@ pub fn find_bug_path(state: &AppState, id: u32) -> Option<PathBuf> {
 pub fn read_versioned<T>(data: &[u8]) -> Result<T, String>
 where
     T: rkyv::Archive + HasVersion,
-    T::Archived: for<'a> rkyv::CheckBytes<rkyv::validation::validators::DefaultValidator<'a>> + rkyv::Deserialize<T, rkyv::de::deserializers::SharedDeserializeMap>,
+    T::Archived: for<'a> rkyv::CheckBytes<rkyv::validation::validators::DefaultValidator<'a>>
+        + rkyv::Deserialize<T, rkyv::de::deserializers::SharedDeserializeMap>,
 {
     match rkyv::from_bytes::<T>(data) {
-        Ok(val) => {
-            Ok(val)
-        }
+        Ok(val) => Ok(val),
         Err(e) => {
             let err_msg = format!("Rkyv deserialization error: {:?}", e);
             tracing::error!("{}", err_msg);
