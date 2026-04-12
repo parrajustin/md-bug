@@ -135,7 +135,7 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchVa
   };
 
   const navItems = [
-    { text: 'Home', icon: <HomeIcon />, path: '/' },
+    { text: 'Home', icon: <HomeIcon />, path: '/', action: () => onSearch('') },
     { text: 'Assigned to me', icon: <AssignmentIcon />, action: () => navigate('/issue/423673307') },
     { text: 'Non-existent Bug', icon: <NotificationImportantIcon />, action: () => navigate('/issue/999') },
     { text: 'Starred by me', icon: <StarIcon /> },
@@ -172,7 +172,7 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchVa
             noWrap
             component="div"
             sx={{ cursor: 'pointer', fontWeight: 'bold' }}
-            onClick={() => navigate('/')}
+            onClick={() => onSearch('')}
           >
             IssueTracker
           </Typography>
