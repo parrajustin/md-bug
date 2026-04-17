@@ -21,10 +21,16 @@ bytecheck = "0.6.12"
 tempfile = "3.10.1"
 fake = "5.1.0"
 rand = "0.8"
+http-body-util = "0.1.1"
+http = "1.1.0"
 
 [[bin]]
 name = "md-bug-backend"
 path = "src/main.rs"
+
+[[bin]]
+name = "md-bug-cli"
+path = "src/cli.rs"
 
 [[bin]]
 name = "debug_tool"
