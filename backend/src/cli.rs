@@ -10,6 +10,8 @@ use md_bug_backend::component_id_cache::ComponentIdCache;
 use serde_json;
 use axum::response::IntoResponse;
 use http_body_util::BodyExt; // For collecting response body
+use reqwest;
+use http::StatusCode;
 
 #[derive(Parser)]
 #[command(name = "md-bug-cli")]
@@ -24,10 +26,19 @@ use http_body_util::BodyExt; // For collecting response body
             "add_template", "modify_template", "delete_template"
         ]),
 ))]
+#[command(group(
+    ArgGroup::new("source")
+        .required(true)
+        .args(["root", "remote"]),
+))]
 struct Args {
     /// Root directory for bug data.
     #[arg(short, long)]
-    root: PathBuf,
+    root: Option<PathBuf>,
+
+    /// Remote server address (e.g., 192.168.1.129:9090)
+    #[arg(long)]
+    remote: Option<String>,
 
     /// Bug ID for bug-specific operations.
     #[arg(long)]
@@ -94,17 +105,22 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    if !args.root.exists() {
-        anyhow::bail!("Root directory does not exist: {:?}", args.root);
+    if let Some(ref remote) = args.remote {
+        return handle_remote(&args, remote).await;
+    }
+
+    let root = args.root.as_ref().ok_or_else(|| anyhow::anyhow!("--root or --remote required"))?;
+    if !root.exists() {
+        anyhow::bail!("Root directory does not exist: {:?}", root);
     }
 
     // Load and update caches
-    let bug_cache = BugIdCache::load_and_update(&args.root);
+    let bug_cache = BugIdCache::load_and_update(root);
     let mut component_cache = ComponentIdCache::default();
-    component_cache.update_from_disk(&args.root);
+    component_cache.update_from_disk(root);
 
     let state = Arc::new(AppState {
-        root: args.root.clone(),
+        root: root.clone(),
         bug_cache,
         component_cache: Mutex::new(component_cache),
         bug_locks: Mutex::new(HashMap::new()),
@@ -217,7 +233,10 @@ async fn print_response(resp: axum::response::Response) -> anyhow::Result<()> {
     let status = resp.status();
     let body_bytes = resp.into_body().collect().await?.to_bytes();
     let body_str = String::from_utf8_lossy(&body_bytes);
+    print_formatted_response(status, &body_str)
+}
 
+fn print_formatted_response(status: StatusCode, body_str: &str) -> anyhow::Result<()> {
     if status.is_success() {
         if body_str.is_empty() {
             println!("Success (Empty Body)");
@@ -234,3 +253,83 @@ async fn print_response(resp: axum::response::Response) -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+async fn handle_remote(args: &Args, remote: &str) -> anyhow::Result<()> {
+    let client = reqwest::Client::new();
+    let base_url = if remote.starts_with("http") {
+        format!("{}/api", remote)
+    } else {
+        format!("http://{}/api", remote)
+    };
+
+    let (resp_status, resp_text) = if let Some(ref val) = args.bug_list {
+        let json_str = val.as_deref().unwrap_or("{\"u\": \"anonymous\"}");
+        let query: serde_json::Value = serde_json::from_str(json_str)?;
+        let resp = client.get(format!("{}/bug_list", base_url)).query(&query).send().await?;
+        (resp.status(), resp.text().await?)
+    } else if let Some(ref json_str) = args.create_bug {
+        let payload: serde_json::Value = serde_json::from_str(json_str)?;
+        let resp = client.post(format!("{}/create_bug", base_url)).json(&payload).send().await?;
+        (resp.status(), resp.text().await?)
+    } else if let Some(ref json_str) = args.get_bug {
+        let id = args.bug.ok_or_else(|| anyhow::anyhow!("--bug ID required"))?;
+        let query: serde_json::Value = serde_json::from_str(json_str)?;
+        let resp = client.get(format!("{}/bug/{}", base_url, id)).query(&query).send().await?;
+        (resp.status(), resp.text().await?)
+    } else if let Some(ref json_str) = args.get_bug_state {
+        let id = args.bug.ok_or_else(|| anyhow::anyhow!("--bug ID required"))?;
+        let query: serde_json::Value = serde_json::from_str(json_str)?;
+        let resp = client.get(format!("{}/bug/{}/state", base_url, id)).query(&query).send().await?;
+        (resp.status(), resp.text().await?)
+    } else if let Some(ref json_str) = args.submit_comment {
+        let id = args.bug.ok_or_else(|| anyhow::anyhow!("--bug ID required"))?;
+        let payload: serde_json::Value = serde_json::from_str(json_str)?;
+        let resp = client.post(format!("{}/bug/{}/comment", base_url, id)).json(&payload).send().await?;
+        (resp.status(), resp.text().await?)
+    } else if let Some(ref json_str) = args.update_bug_metadata {
+        let id = args.bug.ok_or_else(|| anyhow::anyhow!("--bug ID required"))?;
+        let payload: serde_json::Value = serde_json::from_str(json_str)?;
+        let resp = client.post(format!("{}/bug/{}/update_metadata", base_url, id)).json(&payload).send().await?;
+        (resp.status(), resp.text().await?)
+    } else if let Some(ref json_str) = args.component_list {
+        let query: serde_json::Value = serde_json::from_str(json_str)?;
+        let resp = client.get(format!("{}/component_list", base_url)).query(&query).send().await?;
+        (resp.status(), resp.text().await?)
+    } else if let Some(ref json_str) = args.create_component {
+        let payload: serde_json::Value = serde_json::from_str(json_str)?;
+        let resp = client.post(format!("{}/create_component", base_url)).json(&payload).send().await?;
+        (resp.status(), resp.text().await?)
+    } else if let Some(ref json_str) = args.get_component_metadata {
+        let id = args.component.ok_or_else(|| anyhow::anyhow!("--component ID required"))?;
+        let query: serde_json::Value = serde_json::from_str(json_str)?;
+        let resp = client.get(format!("{}/component/{}/get_metadata", base_url, id)).query(&query).send().await?;
+        (resp.status(), resp.text().await?)
+    } else if let Some(ref json_str) = args.update_component_metadata {
+        let id = args.component.ok_or_else(|| anyhow::anyhow!("--component ID required"))?;
+        let payload: serde_json::Value = serde_json::from_str(json_str)?;
+        let resp = client.post(format!("{}/component/{}/update_metadata", base_url, id)).json(&payload).send().await?;
+        (resp.status(), resp.text().await?)
+    } else if let Some(ref json_str) = args.add_template {
+        let id = args.component.ok_or_else(|| anyhow::anyhow!("--component ID required"))?;
+        let payload: serde_json::Value = serde_json::from_str(json_str)?;
+        let resp = client.post(format!("{}/component/{}/add_template", base_url, id)).json(&payload).send().await?;
+        (resp.status(), resp.text().await?)
+    } else if let Some(ref json_str) = args.modify_template {
+        let id = args.component.ok_or_else(|| anyhow::anyhow!("--component ID required"))?;
+        let payload: serde_json::Value = serde_json::from_str(json_str)?;
+        let resp = client.post(format!("{}/component/{}/modify_template", base_url, id)).json(&payload).send().await?;
+        (resp.status(), resp.text().await?)
+    } else if let Some(ref json_str) = args.delete_template {
+        let id = args.component.ok_or_else(|| anyhow::anyhow!("--component ID required"))?;
+        let payload: serde_json::Value = serde_json::from_str(json_str)?;
+        let resp = client.post(format!("{}/component/{}/delete_template", base_url, id)).json(&payload).send().await?;
+        (resp.status(), resp.text().await?)
+    } else {
+        anyhow::bail!("Error no command executed!");
+    };
+
+    let status = StatusCode::from_u16(resp_status.as_u16())?;
+    print_formatted_response(status, &resp_text)?;
+    Ok(())
+}
+

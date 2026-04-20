@@ -23,6 +23,7 @@ fake = "5.1.0"
 rand = "0.8"
 http-body-util = "0.1.1"
 http = "1.1.0"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [[bin]]
 name = "md-bug-backend"
