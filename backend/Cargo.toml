@@ -24,6 +24,9 @@ rand = "0.8"
 http-body-util = "0.1.1"
 http = "1.1.0"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+nanodb = "0.4.1"
+argon2 = "0.5.3"
+password-hash = "0.5.0"
 
 [[bin]]
 name = "md-bug-backend"
