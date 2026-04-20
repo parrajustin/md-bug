@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+
+# Stage 1: Backend Builder
+FROM rust:1.86-bookworm AS backend-builder
+WORKDIR /build
+# Copy the backend source
+# NOTE: This Dockerfile MUST be built from the parent directory of md-bug
+# Example: docker build -t md-bug-root -f md-bug/Dockerfile.root .
+COPY md-bug/backend ./backend
+WORKDIR /build/backend
+# Build the release binaries
+RUN cargo build --release
+
+# Stage 2: Final Image
+FROM gcr.io/distroless/cc-debian12
+WORKDIR /app
+
+# Copy binary from backend-builder
+COPY --from=backend-builder /build/backend/target/release/md-bug-backend /app/
+
+# Default environment variables for root component creation
+ENV BUG_ROOT=/app/work
+ENV CREATE_ROOT_COMPONENT=All
+ENV ADMIN_USER_ID=admin
+
+# The entrypoint is the backend binary.
+# It will automatically pick up BUG_ROOT, CREATE_ROOT_COMPONENT, and ADMIN_USER_ID from the environment.
+ENTRYPOINT ["/app/md-bug-backend"]

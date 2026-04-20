@@ -17,22 +17,22 @@ use tower_http::services::{ServeDir, ServeFile};
 #[derive(Parser)]
 struct Args {
     /// Root directory for bug data.
-    #[arg(short, long)]
+    #[arg(short, long, env = "BUG_ROOT")]
     root: PathBuf,
     /// Port to listen on.
-    #[arg(short, long, default_value = "8080")]
+    #[arg(short, long, default_value = "8080", env = "BUG_PORT")]
     port: u16,
     /// Directory containing frontend static files.
-    #[arg(short, long, default_value = "../frontend/public")]
+    #[arg(short, long, default_value = "../frontend/public", env = "FRONTEND_DIR")]
     frontend_dir: PathBuf,
     /// Whether to generate fake data upon startup.
-    #[arg(long, default_value = "false")]
+    #[arg(long, default_value = "false", env = "GENERATE_FAKE_DATA")]
     fake_data: bool,
     /// Create a new root component with the given name and exit.
-    #[arg(long = "CreateRootComponent")]
+    #[arg(long = "CreateRootComponent", env = "CREATE_ROOT_COMPONENT")]
     create_root_component: Option<String>,
     /// The user ID of the admin for the new root component. Required with --CreateRootComponent.
-    #[arg(long = "AdminUserId", requires = "create_root_component")]
+    #[arg(long = "AdminUserId", requires = "create_root_component", env = "ADMIN_USER_ID")]
     admin_user_id: Option<String>,
 }
 
