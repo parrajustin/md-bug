@@ -12,7 +12,9 @@ import {
   FormControl, 
   InputLabel, 
   Divider,
-  CircularProgress
+  CircularProgress,
+  Alert,
+  FormHelperText
 } from '@mui/material';
 import { get_api, type ComponentSummary, type CreateComponentRequest } from './api/api';
 
@@ -36,7 +38,7 @@ const CreateComponentView: React.FC<CreateComponentViewProps> = ({ username }) =
     const fetchData = async () => {
       const apiResult = get_api();
       if (apiResult.ok) {
-        const result = await apiResult.val.get_component_list(username);
+        const result = await apiResult.val.get_component_list();
         if (result.ok) {
           const comps = result.val;
           setComponents(comps);
@@ -76,7 +78,7 @@ const CreateComponentView: React.FC<CreateComponentViewProps> = ({ username }) =
       parent_id: parentId,
     };
 
-    const result = await apiResult.val.create_component(username, request);
+    const result = await apiResult.val.create_component(request);
     if (result.ok) {
       // Navigate to the component view (using search)
       // Since it's a new component, we don't have the ID yet in the response (API returns void)
@@ -116,6 +118,17 @@ const CreateComponentView: React.FC<CreateComponentViewProps> = ({ username }) =
       
       <Paper variant="outlined" sx={{ p: 4 }}>
         <Stack spacing={3}>
+          {components.length === 0 && (
+            <Alert severity="info">
+              No components exist yet, so there is nothing to nest under. Create a
+              root component first, then reload:
+              <Box component="pre" sx={{ mt: 1, mb: 0, whiteSpace: 'pre-wrap' }}>
+                cargo run --bin md-bug-backend -- -r ./bug-data{'\n'}
+                {'  '}--CreateRootComponent &lt;name&gt; --AdminUserId {username}
+              </Box>
+            </Alert>
+          )}
+
           <TextField
             fullWidth
             label="Component Name"
@@ -143,9 +156,12 @@ const CreateComponentView: React.FC<CreateComponentViewProps> = ({ username }) =
               label="Parent Component"
               onChange={(e) => setParentId(Number(e.target.value))}
             >
-              <MenuItem value={0}>
-                <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
-                  [Root] (No parent)
+              {/* Root components cannot be created through the API — the backend
+                  rejects parent_id 0 with 403 by design. Kept visible but disabled
+                  so the constraint is discoverable rather than a mystery error. */}
+              <MenuItem value={0} disabled>
+                <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                  [Root] — create via CLI only
                 </Typography>
               </MenuItem>
               {components.map(c => (
@@ -154,6 +170,12 @@ const CreateComponentView: React.FC<CreateComponentViewProps> = ({ username }) =
                 </MenuItem>
               ))}
             </Select>
+            {parentId === 0 && (
+              <FormHelperText error>
+                Pick a parent component. Root components are created with the
+                backend CLI, not through this form.
+              </FormHelperText>
+            )}
           </FormControl>
 
           <Divider sx={{ my: 1 }} />
@@ -162,8 +184,8 @@ const CreateComponentView: React.FC<CreateComponentViewProps> = ({ username }) =
             <Button 
               variant="contained" 
               size="large"
-              onClick={handleSubmit} 
-              disabled={isSubmitting}
+              onClick={handleSubmit}
+              disabled={isSubmitting || parentId === 0}
               sx={{ px: 4, borderRadius: '24px' }}
             >
               {isSubmitting ? 'Creating...' : 'Create Component'}

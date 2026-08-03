@@ -1,74 +1,124 @@
 import React, { useState } from 'react';
-import { storage } from './api/storage';
+import {
+  Alert,
+  Box,
+  Button,
+  CircularProgress,
+  Paper,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material';
+import { authApi, persistSession } from './api/auth_api';
+import type { StoredSession } from './api/storage';
 
 interface LoginViewProps {
-  onLogin: (username: string) => void;
+  /// Called on a successful login. `mustChangePassword` is true for accounts whose
+  /// password was set by someone else (the bootstrap admin, or any admin-created user),
+  /// in which case the app must route to the change-password screen — every other
+  /// endpoint 403s until the password is rotated.
+  onLogin: (session: StoredSession, mustChangePassword: boolean) => void;
 }
 
 const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
   const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
+
     if (!username.trim()) {
       setError('Please enter a username');
       return;
     }
-
-    const result = await storage.setUsername(username.trim());
-    if (result.ok) {
-      onLogin(username.trim());
-    } else {
-      setError('Failed to save username: ' + result.val.message);
+    if (!password) {
+      setError('Please enter a password');
+      return;
     }
+
+    setSubmitting(true);
+    const result = await authApi.login(username.trim(), password);
+    setSubmitting(false);
+
+    if (result.err) {
+      setError(result.val.message);
+      return;
+    }
+
+    const { session, mustChangePassword } = result.safeUnwrap();
+    // Persist before handing control back so a reload keeps the session.
+    await persistSession(session);
+    onLogin(session, mustChangePassword);
   };
 
   return (
-    <div className="login-view" style={{ 
-      display: 'flex', 
-      justifyContent: 'center', 
-      alignItems: 'center', 
-      height: '100vh',
-      backgroundColor: '#000',
-      color: 'white'
-    }}>
-      <div className="card" style={{ maxWidth: '400px', width: '100%', padding: '40px' }}>
-        <h1 style={{ textAlign: 'center', marginBottom: '30px' }}>IssueTracker</h1>
-        <p style={{ textAlign: 'center', color: '#888', marginBottom: '30px' }}>
-          Please enter a username to continue.
-        </p>
+    <Box
+      sx={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        minHeight: '100vh',
+        bgcolor: 'background.default',
+        p: 2,
+      }}
+    >
+      <Paper
+        variant="outlined"
+        sx={{ maxWidth: 420, width: '100%', p: 4 }}
+        data-testid="login-card"
+      >
+        <Typography variant="h4" align="center" sx={{ mb: 1, fontWeight: 500 }}>
+          IssueTracker
+        </Typography>
+        <Typography variant="body2" align="center" color="text.secondary" sx={{ mb: 3 }}>
+          Sign in to continue.
+        </Typography>
+
         <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: '#ccc' }}>Username</label>
-            <input 
-              type="text" 
-              value={username} 
+          <Stack spacing={2}>
+            <TextField
+              fullWidth
+              label="Username"
+              value={username}
               onChange={(e) => setUsername(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '12px',
-                backgroundColor: '#1e1e1e',
-                border: '1px solid #333',
-                borderRadius: '4px',
-                color: 'white',
-                fontSize: '16px'
-              }}
-              placeholder="e.g. john_doe"
+              placeholder="e.g. admin"
               autoFocus
+              autoComplete="username"
+              slotProps={{ htmlInput: { 'data-testid': 'login-username' } }}
             />
-          </div>
-          {error && <div style={{ color: '#ff4d4d', marginBottom: '20px', fontSize: '14px' }}>{error}</div>}
-          <button 
-            type="submit" 
-            className="primary-btn" 
-            style={{ width: '100%', padding: '12px', fontSize: '16px' }}
-          >
-            Enter
-          </button>
+            <TextField
+              fullWidth
+              type="password"
+              label="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              slotProps={{ htmlInput: { 'data-testid': 'login-password' } }}
+            />
+
+            {error && (
+              <Alert severity="error" data-testid="login-error">
+                {error}
+              </Alert>
+            )}
+
+            <Button
+              type="submit"
+              variant="contained"
+              size="large"
+              disabled={submitting}
+              data-testid="login-submit"
+              sx={{ py: 1.25 }}
+            >
+              {submitting ? <CircularProgress size={24} /> : 'Sign in'}
+            </Button>
+          </Stack>
         </form>
-      </div>
-    </div>
+      </Paper>
+    </Box>
   );
 };
 

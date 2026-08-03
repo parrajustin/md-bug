@@ -106,8 +106,8 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username, search, onSe
       const apiResult = get_api();
       if (apiResult.ok) {
         const [bugsResult, compsResult] = await Promise.all([
-          apiResult.val.get_bug_list(username, search),
-          apiResult.val.get_component_list(username)
+          apiResult.val.get_bug_list(search),
+          apiResult.val.get_component_list()
         ]);
 
         if (bugsResult.ok) {
@@ -137,7 +137,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onBugSelect, username, search, onSe
       }
       const apiResult = get_api();
       if (apiResult.ok) {
-        const res = await apiResult.val.get_component_metadata(username, activeComponentId);
+        const res = await apiResult.val.get_component_metadata(activeComponentId);
         if (res.ok) {
           const meta = res.val;
           let admin = false;

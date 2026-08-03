@@ -94,8 +94,8 @@ const ComponentEditorView: React.FC<ComponentEditorViewProps> = ({ username }) =
       const apiResult = get_api();
       if (apiResult.ok) {
         const [metaRes, compsRes] = await Promise.all([
-          apiResult.val.get_component_metadata(username, parseInt(id)),
-          apiResult.val.get_component_list(username)
+          apiResult.val.get_component_metadata(parseInt(id)),
+          apiResult.val.get_component_list()
         ]);
 
         if (metaRes.ok) {
@@ -131,7 +131,7 @@ const ComponentEditorView: React.FC<ComponentEditorViewProps> = ({ username }) =
     if (!apiResult.ok) return;
 
     setIsSubmitting(true);
-    const res = await apiResult.val.update_component_metadata(username, parseInt(id), metadata);
+    const res = await apiResult.val.update_component_metadata(parseInt(id), metadata);
     if (res.ok) {
       alert("Changes saved successfully");
     } else {
@@ -308,7 +308,7 @@ const ComponentEditorView: React.FC<ComponentEditorViewProps> = ({ username }) =
       <Card variant="outlined">
         <CardHeader 
           title="Sub-Components" 
-          titleTypographyProps={{ variant: 'h6', sx: { fontWeight: 'bold' } }}
+          slotProps={{ title: { variant: 'h6', sx: { fontWeight: 'bold' } } }}
         />
         <Divider />
         <CardContent>

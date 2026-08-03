@@ -1,0 +1,3 @@
+node_modules/
+# Actual captures and diff images from the last run; goldens are committed, these are not.
+output/

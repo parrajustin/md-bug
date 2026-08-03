@@ -12,8 +12,10 @@ import CreateComponentView from './CreateComponentView';
 import ComponentEditorView from './ComponentEditorView';
 import { type Result } from 'standard-ts-lib/src/result';
 import { StatusError } from 'standard-ts-lib/src/status_error';
-import { storage } from './api/storage';
+import { type StoredSession } from './api/storage';
+import { restoreSession, clearSession, getActiveSession, authApi } from './api/auth_api';
 import LoginView from './LoginView';
+import ChangePasswordView from './ChangePasswordView';
 import './styles.css';
 
 interface BugLoaderProps {
@@ -44,7 +46,7 @@ const BugLoader: React.FC<BugLoaderProps> = ({ currentResult, setResult, usernam
 
       if (cachedBug && cachedBug.id === bugId) {
         // Optimization: Check state first for the "already cached" bug
-        api.get_bug_state(username, bugId).then((stateResult: any) => {
+        api.get_bug_state(bugId).then((stateResult: any) => {
           if (stateResult.ok && stateResult.val.state_id === cachedBug.state_id) {
             // State matches, no need to re-fetch
           } else {
@@ -63,7 +65,7 @@ const BugLoader: React.FC<BugLoaderProps> = ({ currentResult, setResult, usernam
 
   const fetchFullBug = (api: any, bugId: number) => {
     setLoading(true);
-    api.get_bug(username, bugId).then((result: Result<Bug, StatusError>) => {
+    api.get_bug(bugId).then((result: Result<Bug, StatusError>) => {
       setResult(result);
       setLoading(false);
     });
@@ -115,16 +117,18 @@ const App: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [bugResult, setBugResult] = useState<Result<Bug, StatusError> | null>(null);
-  const [username, setUsername] = useState<string | null>(null);
+  const [session, setSession] = useState<StoredSession | null>(null);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [checkingUsername, setCheckingUsername] = useState(true);
   const [activeBugId, setActiveBugId] = useState<number | null>(null);
   
   const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
 
   useEffect(() => {
-    storage.getUsername().then(result => {
-      if (result.ok && result.val.some) {
-        setUsername(result.val.safeValue());
+    // Rehydrate a stored session so a reload does not force a fresh login.
+    restoreSession().then((result) => {
+      if (result.ok && result.val) {
+        setSession(result.val);
       }
       setCheckingUsername(false);
     });
@@ -142,14 +146,26 @@ const App: React.FC = () => {
     navigate(`/issue/${id}`);
   };
 
-  const handleLogin = (name: string) => {
-    setUsername(name);
+  const handleLogin = (newSession: StoredSession, forcedChange: boolean) => {
+    setSession(newSession);
+    setMustChangePassword(forcedChange);
+    navigate('/');
+  };
+
+  /// After a password change every token for the account is revoked server-side, so the
+  /// only correct next step is a fresh sign-in.
+  const handlePasswordChanged = () => {
+    setSession(null);
+    setMustChangePassword(false);
     navigate('/');
   };
 
   const handleSignOut = async () => {
-    await storage.clearUsername();
-    setUsername(null);
+    const active = getActiveSession();
+    if (active) await authApi.logout(active.accessToken);
+    await clearSession();
+    setSession(null);
+    setMustChangePassword(false);
     navigate('/');
   };
 
@@ -172,7 +188,7 @@ const App: React.FC = () => {
     );
   }
 
-  if (!username) {
+  if (!session) {
     return (
       <ThemeProvider theme={theme}>
         <CssBaseline />
@@ -180,6 +196,23 @@ const App: React.FC = () => {
       </ThemeProvider>
     );
   }
+
+  // The backend rejects every non-auth endpoint while this flag is set, so there is no
+  // point rendering the app behind it.
+  if (mustChangePassword) {
+    return (
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <ChangePasswordView
+          username={session.username}
+          forced
+          onChanged={handlePasswordChanged}
+        />
+      </ThemeProvider>
+    );
+  }
+
+  const username = session.username;
 
   return (
     <ThemeProvider theme={theme}>

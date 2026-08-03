@@ -50,7 +50,7 @@ export class FakeApi implements API {
     }
   ];
 
-  async get_bug_list(username: string, query?: string): Promise<Result<BugSummary[], StatusError>> {
+  async get_bug_list(query?: string): Promise<Result<BugSummary[], StatusError>> {
     let bugs = this.mockBugs;
     if (query) {
       const q = query.toLowerCase();
@@ -69,7 +69,7 @@ export class FakeApi implements API {
     })));
   }
 
-  async get_bug(username: string, id: number): Promise<Result<Bug, StatusError>> {
+  async get_bug(id: number): Promise<Result<Bug, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
     if (bug.metadata.state_id === undefined) bug.metadata.state_id = 1n;
@@ -77,13 +77,13 @@ export class FakeApi implements API {
     return Ok(bug);
   }
 
-  async get_bug_state(username: string, id: number): Promise<Result<BugStateResponse, StatusError>> {
+  async get_bug_state(id: number): Promise<Result<BugStateResponse, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
     return Ok({ state_id: bug.state_id });
   }
 
-  async submit_comment(username: string, id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>> {
+  async submit_comment(id: number, content: string): Promise<Result<SubmitCommentResponse, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
     const newId = bug.comments.length + 1;
@@ -92,7 +92,7 @@ export class FakeApi implements API {
     bug.comments.push({
       version: 1,
       id: newId,
-      author,
+      author: 'fake_user',
       content,
       epoch_nanoseconds: BigInt(Date.now()) * 1000000n
     });
@@ -102,7 +102,7 @@ export class FakeApi implements API {
     });
   }
 
-  async update_bug_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>> {
+  async update_bug_metadata(id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
     bug.metadata.state_id = (bug.metadata.state_id || 1n) + 1n;
@@ -121,7 +121,7 @@ export class FakeApi implements API {
     });
   }
 
-  async get_component_metadata(username: string, id: number): Promise<Result<ComponentMetadata, StatusError>> {
+  async get_component_metadata(id: number): Promise<Result<ComponentMetadata, StatusError>> {
     return Ok({
       version: 1,
       id,
@@ -158,7 +158,7 @@ export class FakeApi implements API {
     });
   }
 
-  async get_component_list(username: string): Promise<Result<ComponentSummary[], StatusError>> {
+  async get_component_list(): Promise<Result<ComponentSummary[], StatusError>> {
     const components: ComponentSummary[] = [
       {
         id: 1,
@@ -185,27 +185,27 @@ export class FakeApi implements API {
     return Ok(components);
   }
 
-  async update_component_metadata(username: string, id: number, metadata: ComponentMetadata): Promise<Result<void, StatusError>> {
+  async update_component_metadata(id: number, metadata: ComponentMetadata): Promise<Result<void, StatusError>> {
     return Ok(undefined);
   }
 
-  async add_template(username: string, id: number, template: BugTemplate): Promise<Result<void, StatusError>> {
+  async add_template(id: number, template: BugTemplate): Promise<Result<void, StatusError>> {
     return Ok(undefined);
   }
 
-  async modify_template(username: string, id: number, old_name: string, template: BugTemplate): Promise<Result<void, StatusError>> {
+  async modify_template(id: number, old_name: string, template: BugTemplate): Promise<Result<void, StatusError>> {
     return Ok(undefined);
   }
 
-  async delete_template(username: string, id: number, name: string): Promise<Result<void, StatusError>> {
+  async delete_template(id: number, name: string): Promise<Result<void, StatusError>> {
     return Ok(undefined);
   }
 
-  async create_component(username: string, request: CreateComponentRequest): Promise<Result<void, StatusError>> {
+  async create_component(request: CreateComponentRequest): Promise<Result<void, StatusError>> {
     return Ok(undefined);
   }
 
-  async create_bug(username: string, request: CreateBugRequest): Promise<Result<number, StatusError>> {
+  async create_bug(request: CreateBugRequest): Promise<Result<number, StatusError>> {
     return Ok(Math.floor(Math.random() * 1000000));
   }
 }

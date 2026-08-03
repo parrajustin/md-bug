@@ -1,5 +1,13 @@
 # Authentication & Token Management Research
 
+> **Status: superseded research, not a description of the running system.**
+>
+> Authentication now exists, but it was **not** built to this design. The shipped system
+> uses opaque database-backed tokens rather than Ed25519 JWTs, has no Firebase or
+> service-account flows, and derives identity from an Axum extractor rather than the
+> middleware sketched in §5. See `CLAUDE.md` in this directory for what actually runs.
+> Keep this file for the reasoning; do not implement from it.
+
 This document Distills best practices for implementing a secure, hybrid authentication system in Rust (Axum). It unifies external identity providers (Firebase) and internal credentials (Native/Service Accounts) into a single, local session management system.
 
 ## 1. Unified Local Session Model

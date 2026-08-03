@@ -9,6 +9,17 @@ use std::path::Path as StdPath;
 use axum::http::StatusCode;
 use crate::bug_id_cache::BugIdCache;
 
+/// Builds an isolated account store for a test. Handlers reach for `state.users` only
+/// through the extractor, which these tests bypass via `RequestUser::local`, so the
+/// contents do not matter — but `AppState` still requires one.
+async fn test_user_manager(root: &std::path::Path) -> std::sync::Arc<crate::user::UserManager> {
+    std::sync::Arc::new(
+        crate::user::UserManager::new(&root.join("users.json"))
+            .await
+            .expect("user db"),
+    )
+}
+
 fn create_test_bug(root: &StdPath, id: u32, component_id: u32, folders: Vec<String>) -> anyhow::Result<std::path::PathBuf> {
     let mut bug_path = root.to_path_buf();
     for folder in &folders {
@@ -116,14 +127,15 @@ async fn test_access_control_inheritance() -> anyhow::Result<()> {
         component_cache: Mutex::new(component_cache),
         bug_locks: Mutex::new(HashMap::new()),
         component_locks: Mutex::new(HashMap::new()),
+        users: test_user_manager(root).await,
     });
 
     // Case 1: parent_admin should have Full access via inheritance
-    let res = get_bug(State(state.clone()), Path(1), Query(BugQuery { u: "parent_admin".to_string() })).await.into_response();
+    let res = get_bug(State(state.clone()), Path(1), RequestUser::local("parent_admin", 1, false)).await.into_response();
     assert_eq!(res.status(), StatusCode::OK);
 
     // Case 2: contributor should have View access
-    let res = get_bug(State(state.clone()), Path(1), Query(BugQuery { u: "contributor".to_string() })).await.into_response();
+    let res = get_bug(State(state.clone()), Path(1), RequestUser::local("contributor", 1, false)).await.into_response();
     assert_eq!(res.status(), StatusCode::OK);
 
     // Case 3: random_user should be Forbidden (default bug created by create_test_bug only has PUBLIC Comment access)
@@ -136,11 +148,11 @@ async fn test_access_control_inheritance() -> anyhow::Result<()> {
     let bytes = rkyv::to_bytes::<_, 1024>(&bug_meta).map_err(|e| anyhow::anyhow!(e.to_string()))?;
     fs::write(bug_path.join("metadata"), bytes)?;
 
-    let res = get_bug(State(state.clone()), Path(1), Query(BugQuery { u: "random_user".to_string() })).await.into_response();
+    let res = get_bug(State(state.clone()), Path(1), RequestUser::local("random_user", 1, false)).await.into_response();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 
     // Case 4: child_admin should have Full access
-    let res = get_bug(State(state.clone()), Path(1), Query(BugQuery { u: "child_admin".to_string() })).await.into_response();
+    let res = get_bug(State(state.clone()), Path(1), RequestUser::local("child_admin", 1, false)).await.into_response();
     assert_eq!(res.status(), StatusCode::OK);
 
     Ok(())
@@ -160,16 +172,16 @@ async fn test_create_component_permissions() -> anyhow::Result<()> {
         component_cache: Mutex::new(component_cache),
         bug_locks: Mutex::new(HashMap::new()),
         component_locks: Mutex::new(HashMap::new()),
+        users: test_user_manager(root).await,
     });
 
     // Case 1: Root creation attempt via API - SHOULD BE FORBIDDEN
     let req = CreateComponentRequest {
-        u: "first_user".to_string(),
         name: "Root Comp".to_string(),
         description: "First one".to_string(),
         parent_id: 0,
     };
-    let res = create_component(State(state.clone()), Json(req)).await.into_response();
+    let res = create_component(State(state.clone()), RequestUser::local("first_user", 1, false), Json(req)).await.into_response();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 
     // Now create a component manually to test sub-component creation
@@ -181,22 +193,20 @@ async fn test_create_component_permissions() -> anyhow::Result<()> {
     
     // Case 2: unauthorized user tries to create sub-component
     let req = CreateComponentRequest {
-        u: "intruder".to_string(),
         name: "Hack".to_string(),
         description: "Evil".to_string(),
         parent_id: 1, 
     };
-    let res = create_component(State(state.clone()), Json(req)).await.into_response();
+    let res = create_component(State(state.clone()), RequestUser::local("intruder", 1, false), Json(req)).await.into_response();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 
     // Case 3: authorized admin creates sub-component
     let req = CreateComponentRequest {
-        u: "admin_user".to_string(),
         name: "Sub Comp".to_string(),
         description: "Child".to_string(),
         parent_id: 1,
     };
-    let res = create_component(State(state.clone()), Json(req)).await.into_response();
+    let res = create_component(State(state.clone()), RequestUser::local("admin_user", 1, false), Json(req)).await.into_response();
     assert_eq!(res.status(), StatusCode::CREATED);
 
     Ok(())
@@ -216,6 +226,7 @@ async fn test_create_component_collisions() -> anyhow::Result<()> {
         component_cache: Mutex::new(component_cache),
         bug_locks: Mutex::new(HashMap::new()),
         component_locks: Mutex::new(HashMap::new()),
+        users: test_user_manager(root).await,
     });
 
     // Create initial manual root
@@ -227,32 +238,29 @@ async fn test_create_component_collisions() -> anyhow::Result<()> {
 
     // Create initial component under manual root
     let req = CreateComponentRequest {
-        u: "admin".to_string(),
         name: "My Comp".to_string(), // safe name: my_comp
         description: "Desc".to_string(),
         parent_id: 1,
     };
-    let res = create_component(State(state.clone()), Json(req)).await.into_response();
+    let res = create_component(State(state.clone()), RequestUser::local("admin", 1, false), Json(req)).await.into_response();
     assert_eq!(res.status(), StatusCode::CREATED);
 
     // Case 1: Conflict by Name (not folder name)
     let req = CreateComponentRequest {
-        u: "admin".to_string(),
         name: "My Comp".to_string(), // Exact same name
         description: "Another".to_string(),
         parent_id: 1,
     };
-    let res = create_component(State(state.clone()), Json(req)).await.into_response();
+    let res = create_component(State(state.clone()), RequestUser::local("admin", 1, false), Json(req)).await.into_response();
     assert_eq!(res.status(), StatusCode::CONFLICT);
 
     // Case 2: Conflict by Folder (sanitization)
     let req = CreateComponentRequest {
-        u: "admin".to_string(),
         name: "my-comp".to_string(),
         description: "Different name, same folder".to_string(),
         parent_id: 1,
     };
-    let res = create_component(State(state.clone()), Json(req)).await.into_response();
+    let res = create_component(State(state.clone()), RequestUser::local("admin", 1, false), Json(req)).await.into_response();
     assert_eq!(res.status(), StatusCode::CREATED); 
     
     assert!(root.join("manual_root").join("my_comp").exists());
@@ -275,6 +283,7 @@ async fn test_create_component_group_inheritance() -> anyhow::Result<()> {
         component_cache: Mutex::new(component_cache),
         bug_locks: Mutex::new(HashMap::new()),
         component_locks: Mutex::new(HashMap::new()),
+        users: test_user_manager(root).await,
     });
 
     // 1. Create parent component with default groups and a special group
@@ -299,7 +308,6 @@ async fn test_create_component_group_inheritance() -> anyhow::Result<()> {
 
     // 2. Call create_component API to create child as "admin"
     let req = CreateComponentRequest {
-        u: "admin".to_string(),
         name: "Child".to_string(),
         description: "Child component".to_string(),
         parent_id: 1,
@@ -311,7 +319,7 @@ async fn test_create_component_group_inheritance() -> anyhow::Result<()> {
         cache.insert(1, "parent".to_string());
     }
 
-    let res = create_component(State(state.clone()), Json(req)).await.into_response();
+    let res = create_component(State(state.clone()), RequestUser::local("admin", 1, false), Json(req)).await.into_response();
     assert_eq!(res.status(), StatusCode::CREATED);
 
     // 3. Verify child metadata
@@ -348,9 +356,10 @@ async fn test_create_and_get_bug() -> anyhow::Result<()> {
         component_cache: Mutex::new(ComponentIdCache::default()),
         bug_locks: Mutex::new(HashMap::new()),
         component_locks: Mutex::new(HashMap::new()),
+        users: test_user_manager(dir.path()).await,
     });
 
-    let response = get_bug(State(state.clone()), Path(1), Query(BugQuery { u: "test@example.com".to_string() })).await.into_response();
+    let response = get_bug(State(state.clone()), Path(1), RequestUser::local("test@example.com", 1, false)).await.into_response();
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), 1024 * 1024).await?;
@@ -376,15 +385,14 @@ async fn test_submit_comment() -> anyhow::Result<()> {
         component_cache: Mutex::new(ComponentIdCache::default()),
         bug_locks: Mutex::new(HashMap::new()),
         component_locks: Mutex::new(HashMap::new()),
+        users: test_user_manager(dir.path()).await,
     });
 
     let req = CommentRequest {
-        author: "alice".to_string(),
         content: "Hello world".to_string(),
-        u: "alice".to_string(),
     };
 
-    let response = submit_comment(State(state.clone()), Path(42), Json(req)).await.into_response();
+    let response = submit_comment(State(state.clone()), Path(42), RequestUser::local("alice", 1, false), Json(req)).await.into_response();
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), 1024 * 1024).await?;
@@ -423,6 +431,7 @@ async fn test_update_bug_metadata() -> anyhow::Result<()> {
         component_cache: Mutex::new(ComponentIdCache::default()),
         bug_locks: Mutex::new(HashMap::new()),
         component_locks: Mutex::new(HashMap::new()),
+        users: test_user_manager(dir.path()).await,
     });
 
     // Note: create_test_bug by default only gives Comment access to PUBLIC.
@@ -440,10 +449,9 @@ async fn test_update_bug_metadata() -> anyhow::Result<()> {
     let req = MetadataChangeRequest {
         field: "status".to_string(),
         value: "In Progress".to_string(),
-        u: "admin".to_string(),
     };
 
-    let response = update_bug_metadata(State(state.clone()), Path(100), Json(req)).await.into_response();
+    let response = update_bug_metadata(State(state.clone()), Path(100), RequestUser::local("admin", 1, false), Json(req)).await.into_response();
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), 1024 * 1024).await?;
@@ -462,9 +470,8 @@ async fn test_update_bug_metadata() -> anyhow::Result<()> {
     let req_user = MetadataChangeRequest {
         field: "Team".to_string(),
         value: "Perception".to_string(),
-        u: "admin".to_string(),
     };
-    let response = update_bug_metadata(State(state.clone()), Path(100), Json(req_user)).await.into_response();
+    let response = update_bug_metadata(State(state.clone()), Path(100), RequestUser::local("admin", 1, false), Json(req_user)).await.into_response();
     assert_eq!(response.status(), StatusCode::OK);
 
     let data = fs::read(bug_path.join("metadata"))?;
@@ -532,11 +539,11 @@ async fn test_create_bug_with_template_access() -> anyhow::Result<()> {
         component_cache: Mutex::new(component_cache),
         bug_locks: Mutex::new(HashMap::new()),
         component_locks: Mutex::new(HashMap::new()),
+        users: test_user_manager(root).await,
     });
 
     // 2. Create bug using the template
     let req = CreateBugRequest {
-        u: "user1".to_string(),
         component_id: comp_id,
         template_name: "limited".to_string(),
         title: "Template Bug".to_string(),
@@ -550,7 +557,7 @@ async fn test_create_bug_with_template_access() -> anyhow::Result<()> {
         cc: vec![],
     };
 
-    let res = create_bug(State(state.clone()), Json(req)).await.into_response();
+    let res = create_bug(State(state.clone()), RequestUser::local("user1", 1, false), Json(req)).await.into_response();
     assert_eq!(res.status(), StatusCode::OK);
     
     let body = axum::body::to_bytes(res.into_body(), 1024).await?;
@@ -587,9 +594,10 @@ async fn test_get_bug_list_expanded() -> anyhow::Result<()> {
         component_cache: Mutex::new(component_cache),
         bug_locks: Mutex::new(HashMap::new()),
         component_locks: Mutex::new(HashMap::new()),
+        users: test_user_manager(root).await,
     });
 
-    let res = get_bug_list(State(state), Query(SearchQuery { q: None, u: "admin".to_string() })).await.into_response();
+    let res = get_bug_list(State(state), RequestUser::local("admin", 1, false), Query(SearchQuery { q: None })).await.into_response();
     assert_eq!(res.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(res.into_body(), 1024 * 1024).await?;

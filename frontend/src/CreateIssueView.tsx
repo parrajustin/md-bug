@@ -45,7 +45,7 @@ const CreateIssueView: React.FC<CreateIssueViewProps> = ({ username }) => {
     const fetchComponents = async () => {
       const apiResult = get_api();
       if (apiResult.ok) {
-        const result = await apiResult.val.get_component_list(username);
+        const result = await apiResult.val.get_component_list();
         if (result.ok) {
           setComponents(result.val);
           if (result.val.length > 0) {
@@ -91,7 +91,7 @@ const CreateIssueView: React.FC<CreateIssueViewProps> = ({ username }) => {
       cc: cc.split(',').map(s => s.trim()).filter(s => s !== ''),
     };
 
-    const result = await apiResult.val.create_bug(username, request);
+    const result = await apiResult.val.create_bug(request);
     if (result.ok) {
       navigate(`/issue/${result.val}`);
     } else {
@@ -220,7 +220,7 @@ const CreateIssueView: React.FC<CreateIssueViewProps> = ({ username }) => {
               </FormControl>
 
               <Grid container spacing={2}>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <FormControl fullWidth size="small">
                     <InputLabel>Priority</InputLabel>
                     <Select
@@ -232,7 +232,7 @@ const CreateIssueView: React.FC<CreateIssueViewProps> = ({ username }) => {
                     </Select>
                   </FormControl>
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <FormControl fullWidth size="small">
                     <InputLabel>Severity</InputLabel>
                     <Select

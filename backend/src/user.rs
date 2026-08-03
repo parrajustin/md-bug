@@ -8,36 +8,34 @@ use argon2::{
 };
 use password_hash::rand_core::OsRng;
 
+use crate::auth::{self, NewToken, StoredToken, TokenKind};
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct User {
     pub uid: u64,
     pub username: String,
     pub firebase_uid: Option<String>,
     pub password_hash: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ServiceAccount {
-    pub id: u64,
-    pub name: String,
-    pub key_hash: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct RefreshToken {
-    pub token_hash: String,
-    pub user_id: u64,
-    pub is_service_account: bool,
-    pub expires_at: u64, // Epoch nanoseconds
+    /// Admins may create and list users. Everything else is governed by the per-component
+    /// ACLs, which are keyed on `username`.
+    #[serde(default)]
+    pub is_admin: bool,
+    /// Set on the bootstrapped admin (whose password is machine-generated) and on any
+    /// account an admin creates a password for. While true, the API rejects everything
+    /// except changing the password and logging out.
+    #[serde(default)]
+    pub must_change_password: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
 struct UserDb {
     users: Vec<User>,
-    service_accounts: Vec<ServiceAccount>,
-    refresh_tokens: Vec<RefreshToken>,
+    /// Access, refresh and personal access tokens, keyed by id for O(1) lookup.
+    #[serde(default)]
+    tokens: Vec<StoredToken>,
     last_uid: u64,
-    last_sa_id: u64,
+    #[serde(default)]
+    last_token_id: u64,
 }
 
 pub enum UserIdentifier {
@@ -111,7 +109,17 @@ impl UserManager {
         None
     }
 
-    pub async fn create_user(&self, username: &str, firebase_uid: Option<String>, password: Option<&str>) -> anyhow::Result<u64> {
+    /// Creates a user. `must_change_password` should be set whenever the caller — rather
+    /// than the account holder — chose the password, so the holder is forced to replace
+    /// it before the account can be used for anything else.
+    pub async fn create_user(
+        &self,
+        username: &str,
+        firebase_uid: Option<String>,
+        password: Option<&str>,
+        is_admin: bool,
+        must_change_password: bool,
+    ) -> anyhow::Result<u64> {
         let mut db = self.db.write().await;
         let tree = db.data().await.get("data")?;
         let mut data = tree.into::<UserDb>()?;
@@ -142,6 +150,8 @@ impl UserManager {
             username: username.to_string(),
             firebase_uid,
             password_hash,
+            is_admin,
+            must_change_password,
         });
 
         db.insert("data", data).await?;
@@ -164,68 +174,160 @@ impl UserManager {
         Ok(user.uid)
     }
 
-    // --- Service Account Management ---
-
-    pub async fn create_service_account(&self, name: &str, raw_key: &str) -> anyhow::Result<u64> {
+    /// Replaces a user's password and clears the forced-rotation flag.
+    pub async fn set_password(&self, username: &str, password: &str) -> anyhow::Result<()> {
         let mut db = self.db.write().await;
         let tree = db.data().await.get("data")?;
         let mut data = tree.into::<UserDb>()?;
 
-        if data.service_accounts.iter().any(|sa| sa.name == name) {
-            anyhow::bail!("Service account name already exists");
-        }
+        let user = data
+            .users
+            .iter_mut()
+            .find(|u| u.username == username)
+            .ok_or_else(|| anyhow::anyhow!("User not found"))?;
 
         let salt = SaltString::generate(&mut OsRng);
         let argon2 = Argon2::default();
-        let key_hash = argon2.hash_password(raw_key.as_bytes(), &salt).map_err(|e| anyhow::anyhow!(e))?.to_string();
-
-        data.last_sa_id += 1;
-        let id = data.last_sa_id;
-
-        data.service_accounts.push(ServiceAccount {
-            id,
-            name: name.to_string(),
-            key_hash,
-        });
+        user.password_hash = Some(
+            argon2
+                .hash_password(password.as_bytes(), &salt)
+                .map_err(|e| anyhow::anyhow!(e))?
+                .to_string(),
+        );
+        user.must_change_password = false;
 
         db.insert("data", data).await?;
         db.write().await?;
-
-        Ok(id)
+        Ok(())
     }
 
-    pub async fn verify_service_key(&self, raw_key: &str) -> anyhow::Result<u64> {
+    pub async fn set_admin(&self, username: &str, is_admin: bool) -> anyhow::Result<()> {
+        let mut db = self.db.write().await;
+        let tree = db.data().await.get("data")?;
+        let mut data = tree.into::<UserDb>()?;
+
+        let user = data
+            .users
+            .iter_mut()
+            .find(|u| u.username == username)
+            .ok_or_else(|| anyhow::anyhow!("User not found"))?;
+        user.is_admin = is_admin;
+
+        db.insert("data", data).await?;
+        db.write().await?;
+        Ok(())
+    }
+
+    /// Marks an account as needing a password rotation before it can do anything else.
+    pub async fn require_password_change(&self, username: &str) -> anyhow::Result<()> {
+        let mut db = self.db.write().await;
+        let tree = db.data().await.get("data")?;
+        let mut data = tree.into::<UserDb>()?;
+
+        let user = data
+            .users
+            .iter_mut()
+            .find(|u| u.username == username)
+            .ok_or_else(|| anyhow::anyhow!("User not found"))?;
+        user.must_change_password = true;
+
+        db.insert("data", data).await?;
+        db.write().await?;
+        Ok(())
+    }
+
+    pub async fn list_users(&self) -> anyhow::Result<Vec<User>> {
         let db = self.db.read().await;
         let tree = db.data().await.get("data")?;
-        let data = tree.into::<UserDb>()?;
+        Ok(tree.into::<UserDb>()?.users)
+    }
 
-        let argon2 = Argon2::default();
-        for sa in &data.service_accounts {
-            let parsed_hash = PasswordHash::new(&sa.key_hash).map_err(|e| anyhow::anyhow!(e))?;
-            if argon2.verify_password(raw_key.as_bytes(), &parsed_hash).is_ok() {
-                return Ok(sa.id);
-            }
-        }
-
-        anyhow::bail!("Invalid service key")
+    pub async fn count_users(&self) -> anyhow::Result<usize> {
+        Ok(self.list_users().await?.len())
     }
 
     // --- Token Management ---
+    //
+    // Tokens are looked up by id, so verification is a single indexed comparison rather
+    // than an Argon2 pass over every stored row. See `auth.rs` for why SHA-256 is the
+    // right hash for a 256-bit random secret.
 
-    pub async fn add_refresh_token(&self, user_id: u64, is_service_account: bool, raw_token: &str, expires_at: u64) -> anyhow::Result<()> {
+    /// Mints a token for `username` and persists its hash. The returned plaintext is the
+    /// only time the caller can ever see it.
+    pub async fn issue_token(
+        &self,
+        username: &str,
+        uid: u64,
+        kind: TokenKind,
+        label: Option<String>,
+        ttl_secs: Option<u64>,
+    ) -> anyhow::Result<NewToken> {
         let mut db = self.db.write().await;
         let tree = db.data().await.get("data")?;
         let mut data = tree.into::<UserDb>()?;
 
-        let salt = SaltString::generate(&mut OsRng);
-        let argon2 = Argon2::default();
-        let token_hash = argon2.hash_password(raw_token.as_bytes(), &salt).map_err(|e| anyhow::anyhow!(e))?.to_string();
+        data.last_token_id += 1;
+        let token = auth::build_token(data.last_token_id, kind, username, uid, label, ttl_secs);
+        data.tokens.push(token.stored.clone());
 
-        data.refresh_tokens.push(RefreshToken {
-            token_hash,
-            user_id,
-            is_service_account,
-            expires_at,
+        db.insert("data", data).await?;
+        db.write().await?;
+        Ok(token)
+    }
+
+    /// Resolves a presented token string to its stored record, or `None` if it is
+    /// malformed, unknown, expired, or the secret does not match.
+    pub async fn verify_token(&self, presented: &str, expected: TokenKind) -> Option<StoredToken> {
+        let (kind, id, secret) = auth::parse_token(presented)?;
+        if kind != expected {
+            return None;
+        }
+
+        let db = self.db.read().await;
+        let data = db.data().await.get("data").ok()?.into::<UserDb>().ok()?;
+        let stored = data.tokens.iter().find(|t| t.id == id && t.kind == kind)?;
+
+        if auth::verify_stored(stored, &secret, auth::now_secs()) {
+            Some(stored.clone())
+        } else {
+            None
+        }
+    }
+
+    /// Single-use consumption for refresh-token rotation: verifies, then deletes.
+    pub async fn consume_token(&self, presented: &str, expected: TokenKind) -> Option<StoredToken> {
+        let stored = self.verify_token(presented, expected).await?;
+        self.revoke_token(stored.id).await.ok()?;
+        Some(stored)
+    }
+
+    pub async fn revoke_token(&self, token_id: u64) -> anyhow::Result<()> {
+        let mut db = self.db.write().await;
+        let tree = db.data().await.get("data")?;
+        let mut data = tree.into::<UserDb>()?;
+
+        data.tokens.retain(|t| t.id != token_id);
+
+        db.insert("data", data).await?;
+        db.write().await?;
+        Ok(())
+    }
+
+    /// Revokes every token for a user, optionally limited to one kind. Used by logout
+    /// and after a password change.
+    pub async fn revoke_tokens_for_user(
+        &self,
+        username: &str,
+        kind: Option<TokenKind>,
+    ) -> anyhow::Result<()> {
+        let mut db = self.db.write().await;
+        let tree = db.data().await.get("data")?;
+        let mut data = tree.into::<UserDb>()?;
+
+        data.tokens.retain(|t| {
+            let same_user = t.username == username;
+            let same_kind = kind.map(|k| t.kind == k).unwrap_or(true);
+            !(same_user && same_kind)
         });
 
         db.insert("data", data).await?;
@@ -233,54 +335,33 @@ impl UserManager {
         Ok(())
     }
 
-    pub async fn verify_and_consume_refresh_token(&self, raw_token: &str) -> anyhow::Result<(u64, bool)> {
-        let mut db = self.db.write().await;
+    pub async fn list_tokens(&self, username: &str, kind: TokenKind) -> anyhow::Result<Vec<StoredToken>> {
+        let db = self.db.read().await;
         let tree = db.data().await.get("data")?;
-        let mut data = tree.into::<UserDb>()?;
-
-        let argon2 = Argon2::default();
-        let mut found_index = None;
-
-        for (i, rt) in data.refresh_tokens.iter().enumerate() {
-            let parsed_hash = PasswordHash::new(&rt.token_hash).map_err(|e| anyhow::anyhow!(e))?;
-            if argon2.verify_password(raw_token.as_bytes(), &parsed_hash).is_ok() {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)?
-                    .as_nanos() as u64;
-                
-                if rt.expires_at < now {
-                    found_index = Some(i); // Mark for deletion anyway
-                    break;
-                }
-                
-                let res = (rt.user_id, rt.is_service_account);
-                data.refresh_tokens.remove(i);
-                db.insert("data", data).await?;
-                db.write().await?;
-                return Ok(res);
-            }
-        }
-
-        if let Some(i) = found_index {
-            data.refresh_tokens.remove(i);
-            db.insert("data", data).await?;
-            db.write().await?;
-            anyhow::bail!("Token expired");
-        }
-
-        anyhow::bail!("Invalid token")
+        let data = tree.into::<UserDb>()?;
+        Ok(data
+            .tokens
+            .into_iter()
+            .filter(|t| t.username == username && t.kind == kind)
+            .collect())
     }
 
-    pub async fn revoke_all_tokens(&self, user_id: u64, is_service_account: bool) -> anyhow::Result<()> {
+    /// Drops tokens that are already past their expiry.
+    pub async fn prune_expired_tokens(&self) -> anyhow::Result<usize> {
         let mut db = self.db.write().await;
         let tree = db.data().await.get("data")?;
         let mut data = tree.into::<UserDb>()?;
 
-        data.refresh_tokens.retain(|rt| rt.user_id != user_id || rt.is_service_account != is_service_account);
+        let now = auth::now_secs();
+        let before = data.tokens.len();
+        data.tokens.retain(|t| !t.is_expired(now));
+        let removed = before - data.tokens.len();
 
-        db.insert("data", data).await?;
-        db.write().await?;
-        Ok(())
+        if removed > 0 {
+            db.insert("data", data).await?;
+            db.write().await?;
+        }
+        Ok(removed)
     }
 }
 

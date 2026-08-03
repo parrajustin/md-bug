@@ -22,7 +22,8 @@ struct Args {
     component_id: Option<u32>,
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Load and update the bug ID cache.
@@ -38,6 +39,9 @@ fn main() -> anyhow::Result<()> {
         component_cache: Mutex::new(component_cache),
         bug_locks: Mutex::new(HashMap::new()),
         component_locks: Mutex::new(HashMap::new()),
+        users: std::sync::Arc::new(
+            md_bug_backend::user::UserManager::new(&args.root.join("users.json")).await?,
+        ),
     };
 
     if let Some(bug_id) = args.bug_id {

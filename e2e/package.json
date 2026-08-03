@@ -1,0 +1,17 @@
+{
+  "name": "md-bug-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chrome end-to-end tests with golden screenshot comparison",
+  "scripts": {
+    "test": "node run.mjs",
+    "update-goldens": "node run.mjs --update-goldens",
+    "headed": "node run.mjs --headed"
+  },
+  "packageManager": "pnpm@10.29.3",
+  "devDependencies": {
+    "pixelmatch": "^6.0.0",
+    "pngjs": "^7.0.0",
+    "puppeteer": "^24.0.0"
+  }
+}

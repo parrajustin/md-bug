@@ -79,7 +79,7 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, o
       // Check component-level permissions
       const apiResult = get_api();
       if (apiResult.ok) {
-        const compRes = await apiResult.val.get_component_metadata(username, bug.metadata.component_id);
+        const compRes = await apiResult.val.get_component_metadata(bug.metadata.component_id);
         if (compRes.ok) {
           const compMeta = compRes.val;
           for (const group of Object.values(compMeta.access_control.groups)) {
@@ -157,7 +157,7 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, o
     const apiResult = get_api();
     if (!apiResult.ok) return;
 
-    const result = await apiResult.val.update_bug_metadata(username, bug.id, field, value);
+    const result = await apiResult.val.update_bug_metadata(bug.id, field, value);
     if (result.ok) {
       onRefresh(bug.id);
     } else {
@@ -172,7 +172,7 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, o
     if (!apiResult.ok) return;
 
     setIsSubmitting(true);
-    const result = await apiResult.val.submit_comment(username, bug.id, username, commentText);
+    const result = await apiResult.val.submit_comment(bug.id, commentText);
     
     if (result.ok) {
       const response = result.val;
@@ -194,7 +194,7 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, o
         setBug(updatedBug);
         onRefresh(bug.id, updatedBug);
       } else {
-        const fullBugResult = await apiResult.val.get_bug(username, bug.id);
+        const fullBugResult = await apiResult.val.get_bug(bug.id);
         if (fullBugResult.ok) {
           setBug(fullBugResult.val);
           onRefresh(bug.id, fullBugResult.val);
@@ -245,8 +245,8 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, o
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
               onBlur={() => editTitle !== bug.title && handleMetadataChange('title', editTitle)}
-              InputProps={{
-                style: { fontSize: '1.5rem', fontWeight: 500 }
+              slotProps={{
+                input: { style: { fontSize: '1.5rem', fontWeight: 500 } }
               }}
             />
           ) : (
@@ -388,14 +388,14 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, o
                     <Select
                       size="small"
                       fullWidth
-                      value={(bug.metadata as any)[meta.field === 'type' ? 'bug_type' : meta.field]}
+                      value={(bug.metadata as any)[meta.field]}
                       onChange={(e) => handleMetadataChange(meta.field, e.target.value)}
                     >
                       {meta.options.map(opt => <MenuItem key={opt} value={opt}>{opt}</MenuItem>)}
                     </Select>
                   ) : (
                     <Chip 
-                      label={(bug.metadata as any)[meta.field === 'type' ? 'bug_type' : meta.field]} 
+                      label={(bug.metadata as any)[meta.field]}
                       size="small" 
                       color={meta.field === 'status' ? 'primary' : 'default'} 
                     />

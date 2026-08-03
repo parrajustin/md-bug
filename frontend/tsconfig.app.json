@@ -24,5 +24,9 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Tests are type-checked by tsconfig.test.json, which supplies jest/node types and
+  // relaxes erasableSyntaxOnly. Leaving them here would report phantom errors against
+  // the shipped-code type check.
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test"]
 }

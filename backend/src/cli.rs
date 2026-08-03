@@ -36,6 +36,16 @@ struct Args {
     #[arg(short, long)]
     root: Option<PathBuf>,
 
+    /// Identity to act as in local (--root) mode. Local mode already implies direct
+    /// filesystem access to the data these ACLs protect, so this is not a bypass.
+    #[arg(long, default_value = "admin")]
+    user: String,
+
+    /// Bearer token for --remote mode. Obtain one from /api/auth/login, or create a
+    /// personal access token from the UI. Also read from MD_BUG_TOKEN.
+    #[arg(long, env = "MD_BUG_TOKEN")]
+    token: Option<String>,
+
     /// Remote server address (e.g., 192.168.1.129:9090)
     #[arg(long)]
     remote: Option<String>,
@@ -125,32 +135,38 @@ async fn main() -> anyhow::Result<()> {
         component_cache: Mutex::new(component_cache),
         bug_locks: Mutex::new(HashMap::new()),
         component_locks: Mutex::new(HashMap::new()),
+        users: Arc::new(md_bug_backend::user::UserManager::new(&root.join("users.json")).await?),
     });
+
+    // In-process calls skip the HTTP extractor, so build the identity directly.
+    let acting_user = || api::RequestUser::local(args.user.clone(), 1, true);
 
     if let Some(ref val) = args.bug_list {
         let json_str = val.as_deref().unwrap_or("{\"u\": \"anonymous\"}");
         let query: api::SearchQuery = serde_json::from_str(json_str)?;
-        let resp = api::get_bug_list(State(state), Query(query)).await;
+        let resp = api::get_bug_list(State(state), acting_user(), Query(query)).await;
         print_response(resp.into_response()).await?;
     } else if let Some(ref json_str) = args.create_bug {
         let payload: api::CreateBugRequest = serde_json::from_str(json_str)?;
-        let resp = api::create_bug(State(state), ax_Json(payload)).await;
+        let resp = api::create_bug(State(state), acting_user(), ax_Json(payload)).await;
         match resp {
             Ok(r) => print_response(r.into_response()).await?,
             Err(status) => anyhow::bail!("Error: {}", status),
         }
     } else if let Some(ref json_str) = args.get_bug {
         let id = args.bug.ok_or_else(|| anyhow::anyhow!("--bug ID required"))?;
-        let query: api::BugQuery = serde_json::from_str(json_str)?;
-        let resp = api::get_bug(State(state), Path(id), Query(query)).await;
+        // BugQuery is empty now; parsing still validates the JSON is well-formed.
+        let _query: api::BugQuery = serde_json::from_str(json_str)?;
+        let resp = api::get_bug(State(state), Path(id), acting_user()).await;
         match resp {
             Ok(r) => print_response(r.into_response()).await?,
             Err(status) => anyhow::bail!("Error: {}", status),
         }
     } else if let Some(ref json_str) = args.get_bug_state {
         let id = args.bug.ok_or_else(|| anyhow::anyhow!("--bug ID required"))?;
-        let query: api::BugQuery = serde_json::from_str(json_str)?;
-        let resp = api::get_bug_state(State(state), Path(id), Query(query)).await;
+        // BugQuery is empty now; parsing still validates the JSON is well-formed.
+        let _query: api::BugQuery = serde_json::from_str(json_str)?;
+        let resp = api::get_bug_state(State(state), Path(id), acting_user()).await;
         match resp {
             Ok(r) => print_response(r.into_response()).await?,
             Err(status) => anyhow::bail!("Error: {}", status),
@@ -158,7 +174,7 @@ async fn main() -> anyhow::Result<()> {
     } else if let Some(ref json_str) = args.submit_comment {
         let id = args.bug.ok_or_else(|| anyhow::anyhow!("--bug ID required"))?;
         let payload: api::CommentRequest = serde_json::from_str(json_str)?;
-        let resp = api::submit_comment(State(state), Path(id), ax_Json(payload)).await;
+        let resp = api::submit_comment(State(state), Path(id), acting_user(), ax_Json(payload)).await;
         match resp {
             Ok(r) => print_response(r.into_response()).await?,
             Err(status) => anyhow::bail!("Error: {}", status),
@@ -166,26 +182,28 @@ async fn main() -> anyhow::Result<()> {
     } else if let Some(ref json_str) = args.update_bug_metadata {
         let id = args.bug.ok_or_else(|| anyhow::anyhow!("--bug ID required"))?;
         let payload: api::MetadataChangeRequest = serde_json::from_str(json_str)?;
-        let resp = api::update_bug_metadata(State(state), Path(id), ax_Json(payload)).await;
+        let resp = api::update_bug_metadata(State(state), Path(id), acting_user(), ax_Json(payload)).await;
         match resp {
             Ok(r) => print_response(r.into_response()).await?,
             Err(status) => anyhow::bail!("Error: {}", status),
         }
     } else if let Some(ref json_str) = args.component_list {
-        let query: api::BugQuery = serde_json::from_str(json_str)?;
-        let resp = api::get_component_list(State(state), Query(query)).await;
+        // BugQuery is empty now; parsing still validates the JSON is well-formed.
+        let _query: api::BugQuery = serde_json::from_str(json_str)?;
+        let resp = api::get_component_list(State(state), acting_user()).await;
         print_response(resp.into_response()).await?;
     } else if let Some(ref json_str) = args.create_component {
         let payload: api::CreateComponentRequest = serde_json::from_str(json_str)?;
-        let resp = api::create_component(State(state), ax_Json(payload)).await;
+        let resp = api::create_component(State(state), acting_user(), ax_Json(payload)).await;
         match resp {
             Ok(r) => print_response(r.into_response()).await?,
             Err(status) => anyhow::bail!("Error: {}", status),
         }
     } else if let Some(ref json_str) = args.get_component_metadata {
         let id = args.component.ok_or_else(|| anyhow::anyhow!("--component ID required"))?;
-        let query: api::BugQuery = serde_json::from_str(json_str)?;
-        let resp = api::get_component_metadata(State(state), Path(id), Query(query)).await;
+        // BugQuery is empty now; parsing still validates the JSON is well-formed.
+        let _query: api::BugQuery = serde_json::from_str(json_str)?;
+        let resp = api::get_component_metadata(State(state), Path(id), acting_user()).await;
         match resp {
             Ok(r) => print_response(r.into_response()).await?,
             Err(status) => anyhow::bail!("Error: {}", status),
@@ -193,7 +211,7 @@ async fn main() -> anyhow::Result<()> {
     } else if let Some(ref json_str) = args.update_component_metadata {
         let id = args.component.ok_or_else(|| anyhow::anyhow!("--component ID required"))?;
         let payload: api::UpdateComponentMetadataRequest = serde_json::from_str(json_str)?;
-        let resp = api::update_component_metadata(State(state), Path(id), ax_Json(payload)).await;
+        let resp = api::update_component_metadata(State(state), Path(id), acting_user(), ax_Json(payload)).await;
         match resp {
             Ok(r) => print_response(r.into_response()).await?,
             Err(status) => anyhow::bail!("Error: {}", status),
@@ -201,7 +219,7 @@ async fn main() -> anyhow::Result<()> {
     } else if let Some(ref json_str) = args.add_template {
         let id = args.component.ok_or_else(|| anyhow::anyhow!("--component ID required"))?;
         let payload: api::TemplateRequest = serde_json::from_str(json_str)?;
-        let resp = api::add_template(State(state), Path(id), ax_Json(payload)).await;
+        let resp = api::add_template(State(state), Path(id), acting_user(), ax_Json(payload)).await;
         match resp {
             Ok(r) => print_response(r.into_response()).await?,
             Err(status) => anyhow::bail!("Error: {}", status),
@@ -209,7 +227,7 @@ async fn main() -> anyhow::Result<()> {
     } else if let Some(ref json_str) = args.modify_template {
         let id = args.component.ok_or_else(|| anyhow::anyhow!("--component ID required"))?;
         let payload: api::ModifyTemplateRequest = serde_json::from_str(json_str)?;
-        let resp = api::modify_template(State(state), Path(id), ax_Json(payload)).await;
+        let resp = api::modify_template(State(state), Path(id), acting_user(), ax_Json(payload)).await;
         match resp {
             Ok(r) => print_response(r.into_response()).await?,
             Err(status) => anyhow::bail!("Error: {}", status),
@@ -217,7 +235,7 @@ async fn main() -> anyhow::Result<()> {
     } else if let Some(ref json_str) = args.delete_template {
         let id = args.component.ok_or_else(|| anyhow::anyhow!("--component ID required"))?;
         let payload: api::DeleteTemplateRequest = serde_json::from_str(json_str)?;
-        let resp = api::delete_template(State(state), Path(id), ax_Json(payload)).await;
+        let resp = api::delete_template(State(state), Path(id), acting_user(), ax_Json(payload)).await;
         match resp {
             Ok(r) => print_response(r.into_response()).await?,
             Err(status) => anyhow::bail!("Error: {}", status),
@@ -255,7 +273,19 @@ fn print_formatted_response(status: StatusCode, body_str: &str) -> anyhow::Resul
 }
 
 async fn handle_remote(args: &Args, remote: &str) -> anyhow::Result<()> {
-    let client = reqwest::Client::new();
+    let token = args.token.as_ref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "--token (or MD_BUG_TOKEN) is required for --remote. \
+             Get one from POST /api/auth/login, or create a personal access token."
+        )
+    })?;
+
+    let mut headers = reqwest::header::HeaderMap::new();
+    let mut auth_value = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))?;
+    auth_value.set_sensitive(true);
+    headers.insert(reqwest::header::AUTHORIZATION, auth_value);
+
+    let client = reqwest::Client::builder().default_headers(headers).build()?;
     let base_url = if remote.starts_with("http") {
         format!("{}/api", remote)
     } else {

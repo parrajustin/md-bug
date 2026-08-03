@@ -213,20 +213,25 @@ export interface ChangeMetadataResponse {
 
 export type UserAccessLevel = 'None' | 'View' | 'Comment' | 'Full';
 
+/// The bug/component API.
+///
+/// No method takes a username: identity is carried by the bearer token attached in
+/// `BackendApi.request`. A client-supplied username was spoofable and is now rejected
+/// by the backend outright.
 export interface API {
-  get_bug_list(username: string, query?: string): Promise<Result<BugSummary[], StatusError>>;
-  get_bug(username: string, id: number): Promise<Result<Bug, StatusError>>;
-  get_bug_state(username: string, id: number): Promise<Result<BugStateResponse, StatusError>>;
-  submit_comment(username: string, id: number, author: string, content: string): Promise<Result<SubmitCommentResponse, StatusError>>;
-  update_bug_metadata(username: string, id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>>;
-  get_component_metadata(username: string, id: number): Promise<Result<ComponentMetadata, StatusError>>;
-  update_component_metadata(username: string, id: number, metadata: ComponentMetadata): Promise<Result<void, StatusError>>;
-  get_component_list(username: string): Promise<Result<ComponentSummary[], StatusError>>;
-  add_template(username: string, id: number, template: BugTemplate): Promise<Result<void, StatusError>>;
-  modify_template(username: string, id: number, old_name: string, template: BugTemplate): Promise<Result<void, StatusError>>;
-  delete_template(username: string, id: number, name: string): Promise<Result<void, StatusError>>;
-  create_component(username: string, request: CreateComponentRequest): Promise<Result<void, StatusError>>;
-  create_bug(username: string, request: CreateBugRequest): Promise<Result<number, StatusError>>;
+  get_bug_list(query?: string): Promise<Result<BugSummary[], StatusError>>;
+  get_bug(id: number): Promise<Result<Bug, StatusError>>;
+  get_bug_state(id: number): Promise<Result<BugStateResponse, StatusError>>;
+  submit_comment(id: number, content: string): Promise<Result<SubmitCommentResponse, StatusError>>;
+  update_bug_metadata(id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>>;
+  get_component_metadata(id: number): Promise<Result<ComponentMetadata, StatusError>>;
+  update_component_metadata(id: number, metadata: ComponentMetadata): Promise<Result<void, StatusError>>;
+  get_component_list(): Promise<Result<ComponentSummary[], StatusError>>;
+  add_template(id: number, template: BugTemplate): Promise<Result<void, StatusError>>;
+  modify_template(id: number, old_name: string, template: BugTemplate): Promise<Result<void, StatusError>>;
+  delete_template(id: number, name: string): Promise<Result<void, StatusError>>;
+  create_component(request: CreateComponentRequest): Promise<Result<void, StatusError>>;
+  create_bug(request: CreateBugRequest): Promise<Result<number, StatusError>>;
 }
 
 let api_singleton: Optional<API> = None;
@@ -244,4 +249,18 @@ export function get_api(): Result<API, StatusError> {
 
 export function inject_api(api: API): void {
   api_singleton = Some(api);
+}
+
+/// Where the API lives.
+///
+/// The backend serves the built frontend itself, so in a browser the API is always the
+/// page's own origin. Hardcoding a port broke any deployment not on 9000 — and, because
+/// no CORS layer is installed, did so with an opaque network error rather than a useful
+/// status. The localhost fallback is only for non-browser callers such as tests and the
+/// integration suite.
+export function defaultBaseUrl(): string {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+  return 'http://localhost:9000';
 }

@@ -632,6 +632,9 @@ pub struct AppState {
     pub bug_locks: Mutex<HashMap<u32, Arc<tokio::sync::Mutex<()>>>>,
     /// Per-component locks to synchronize modifications.
     pub component_locks: Mutex<HashMap<u32, Arc<tokio::sync::Mutex<()>>>>,
+    /// Accounts and tokens. Every request outside `/api/auth/*` is authenticated
+    /// against this before a handler runs.
+    pub users: Arc<crate::user::UserManager>,
 }
 
 impl AppState {
@@ -668,19 +671,111 @@ pub fn find_component_path(state: &AppState, id: u32) -> Option<PathBuf> {
 }
 
 /// Query parameters for searching bugs.
+///
+/// Note there is no username field: identity comes from the bearer token via the
+/// [`RequestUser`] extractor. A client-supplied username would be trivially spoofable.
 #[derive(SerdeDeserialize)]
 pub struct SearchQuery {
     /// Search term to match against title, assignee, or reporter.
     pub q: Option<String>,
-    /// The username of the user making the request.
-    pub u: String,
 }
 
 /// Query parameters for bug-specific requests.
 #[derive(SerdeDeserialize)]
-pub struct BugQuery {
-    /// The username of the user making the request.
-    pub u: String,
+pub struct BugQuery {}
+
+/// The authenticated caller.
+///
+/// Implemented as an Axum extractor so that adding it to a handler's signature is what
+/// enforces authentication — a handler that forgets it will not compile against a route
+/// that needs identity, and a handler that has it cannot run unauthenticated.
+///
+/// Rejections are deliberately coarse (`401` for anything wrong with the token) so the
+/// endpoint cannot be used to distinguish "no such token" from "expired" from "wrong
+/// secret".
+pub struct RequestUser(pub crate::auth::RequestUser);
+
+impl RequestUser {
+    /// Builds an identity directly, bypassing token verification.
+    ///
+    /// This exists for two callers that have no HTTP request to extract from: the unit
+    /// tests, and `md-bug-cli --root`, which invokes handlers in-process against a local
+    /// data directory. Neither is a privilege escalation — anyone who can run the local
+    /// CLI already has read/write access to the files the ACLs protect.
+    ///
+    /// It must never be reachable from a request path. Over HTTP the only way to obtain
+    /// a `RequestUser` is `from_request_parts`, which requires a valid bearer token.
+    pub fn local(username: impl Into<String>, uid: u64, is_admin: bool) -> Self {
+        RequestUser(crate::auth::RequestUser {
+            username: username.into(),
+            uid,
+            is_admin,
+            via_personal_token: false,
+        })
+    }
+}
+
+impl std::ops::Deref for RequestUser {
+    type Target = crate::auth::RequestUser;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[axum::async_trait]
+impl axum::extract::FromRequestParts<Arc<AppState>> for RequestUser {
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        let header = parts
+            .headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok());
+
+        let presented = crate::auth::bearer_from_header(header)
+            .ok_or((StatusCode::UNAUTHORIZED, "Missing bearer token"))?;
+
+        // Access tokens are the common case; personal access tokens act as their owner
+        // so agents and CLIs can call the API without an interactive login.
+        let stored = match state
+            .users
+            .verify_token(&presented, crate::auth::TokenKind::Access)
+            .await
+        {
+            Some(stored) => stored,
+            None => state
+                .users
+                .verify_token(&presented, crate::auth::TokenKind::Personal)
+                .await
+                .ok_or((StatusCode::UNAUTHORIZED, "Invalid or expired token"))?,
+        };
+
+        let via_personal_token = stored.kind == crate::auth::TokenKind::Personal;
+
+        // Re-read the account rather than trusting the token: admin status and the
+        // force-rotate flag can change after a token is issued.
+        let user = state
+            .users
+            .get_user(crate::user::UserIdentifier::Username(stored.username.clone()))
+            .await
+            .ok_or((StatusCode::UNAUTHORIZED, "Account no longer exists"))?;
+
+        // A user under forced password rotation is locked out of everything except the
+        // change-password and logout endpoints, which do not use this extractor.
+        if user.must_change_password {
+            return Err((StatusCode::FORBIDDEN, "Password change required"));
+        }
+
+        Ok(RequestUser(crate::auth::RequestUser {
+            username: user.username,
+            uid: user.uid,
+            is_admin: user.is_admin,
+            via_personal_token,
+        }))
+    }
 }
 
 /// Resolves the metadata for a component path by merging from root downwards.
@@ -724,7 +819,6 @@ pub fn resolve_component_metadata(root: &std::path::Path, path: &str) -> Compone
 /// Request payload for creating a new component.
 #[derive(SerdeDeserialize)]
 pub struct CreateComponentRequest {
-    pub u: String,
     pub name: String,
     pub description: String,
     pub parent_id: u32,
@@ -765,6 +859,7 @@ pub fn sanitize_name(name: &str) -> String {
 /// 15. Serialize and write the metadata to "component_metadata" in the new folder.
 pub async fn create_component(
     State(state): State<Arc<AppState>>,
+    user: RequestUser,
     Json(payload): Json<CreateComponentRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // 1. Resolve parent path
@@ -794,7 +889,7 @@ pub async fn create_component(
     let parent_meta = resolve_component_metadata(&state.root, &parent_path_str);
 
     // 4. Check authorization
-    let is_authorized = parent_meta.has_permission(&payload.u, &Permission::ComponentAdmin);
+    let is_authorized = parent_meta.has_permission(&user.username, &Permission::ComponentAdmin);
     if !is_authorized {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -845,8 +940,8 @@ pub async fn create_component(
             view_level: 999,
             members: vec![],
         });
-    if !admins.members.contains(&payload.u) {
-        admins.members.push(payload.u.clone());
+    if !admins.members.contains(&user.username) {
+        admins.members.push(user.username.clone());
     }
 
     // Ensure standard groups exist
@@ -912,7 +1007,7 @@ pub async fn create_component(
         id: new_id,
         name: payload.name,
         description: payload.description,
-        creator: payload.u,
+        creator: user.username.clone(),
         bug_type: None,
         priority: None,
         severity: None,
@@ -937,7 +1032,6 @@ pub async fn create_component(
 /// Request payload for creating a new bug.
 #[derive(SerdeDeserialize)]
 pub struct CreateBugRequest {
-    pub u: String,
     pub component_id: u32,
     pub template_name: String,
     pub title: String,
@@ -969,6 +1063,7 @@ pub struct CreateBugRequest {
 /// 12. Update the `BugIdCache` with the new bug's ID and hierarchical location.
 pub async fn create_bug(
     State(state): State<Arc<AppState>>,
+    user: RequestUser,
     Json(payload): Json<CreateBugRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // 1 & 2. Resolve component path
@@ -991,7 +1086,7 @@ pub async fn create_bug(
     let component_meta = resolve_component_metadata(&state.root, &component_path_str);
 
     // 4. Permission check
-    if !component_meta.has_permission(&payload.u, &Permission::CreateIssues) {
+    if !component_meta.has_permission(&user.username, &Permission::CreateIssues) {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1021,7 +1116,7 @@ pub async fn create_bug(
 
     // 8. Apply template-based access control
     let mut access = AccessMetadata::default();
-    access.full_access.push(payload.u.clone());
+    access.full_access.push(user.username.clone());
 
     match template.default_access {
         TemplateAccess::Default => {}
@@ -1036,7 +1131,7 @@ pub async fn create_bug(
     let metadata = BugMetadata {
         version: CURRENT_VERSION,
         id: new_id,
-        reporter: payload.u.clone(),
+        reporter: user.username.clone(),
         bug_type: payload
             .bug_type
             .or(template.bug_type.clone())
@@ -1115,7 +1210,6 @@ pub async fn create_bug(
 /// Request payload for adding a template.
 #[derive(SerdeDeserialize)]
 pub struct TemplateRequest {
-    pub u: String,
     pub template: BugTemplate,
 }
 
@@ -1133,6 +1227,7 @@ pub struct TemplateRequest {
 pub async fn add_template(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
+    user: RequestUser,
     Json(payload): Json<TemplateRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // 1. Lock component
@@ -1153,7 +1248,7 @@ pub async fn add_template(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // 4. Permission check
-    if !meta.has_permission(&payload.u, &Permission::ComponentAdmin) {
+    if !meta.has_permission(&user.username, &Permission::ComponentAdmin) {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1181,7 +1276,6 @@ pub async fn add_template(
 /// Request payload for modifying a template.
 #[derive(SerdeDeserialize)]
 pub struct ModifyTemplateRequest {
-    pub u: String,
     pub old_name: String,
     pub template: BugTemplate,
 }
@@ -1200,6 +1294,7 @@ pub struct ModifyTemplateRequest {
 pub async fn modify_template(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
+    user: RequestUser,
     Json(payload): Json<ModifyTemplateRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let lock = state.get_component_lock(id);
@@ -1212,7 +1307,7 @@ pub async fn modify_template(
     let mut meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if !meta.has_permission(&payload.u, &Permission::ComponentAdmin) {
+    if !meta.has_permission(&user.username, &Permission::ComponentAdmin) {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1244,7 +1339,6 @@ pub async fn modify_template(
 /// Request payload for deleting a template.
 #[derive(SerdeDeserialize)]
 pub struct DeleteTemplateRequest {
-    pub u: String,
     pub name: String,
 }
 
@@ -1260,6 +1354,7 @@ pub struct DeleteTemplateRequest {
 pub async fn delete_template(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
+    user: RequestUser,
     Json(payload): Json<DeleteTemplateRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let lock = state.get_component_lock(id);
@@ -1272,7 +1367,7 @@ pub async fn delete_template(
     let mut meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if !meta.has_permission(&payload.u, &Permission::ComponentAdmin) {
+    if !meta.has_permission(&user.username, &Permission::ComponentAdmin) {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1293,7 +1388,6 @@ pub async fn delete_template(
 /// Request payload for updating component metadata.
 #[derive(SerdeDeserialize)]
 pub struct UpdateComponentMetadataRequest {
-    pub u: String,
     pub metadata: ComponentMetadata,
 }
 
@@ -1301,6 +1395,7 @@ pub struct UpdateComponentMetadataRequest {
 pub async fn update_component_metadata(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
+    user: RequestUser,
     Json(payload): Json<UpdateComponentMetadataRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // 1. Lock component
@@ -1321,7 +1416,7 @@ pub async fn update_component_metadata(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // 4. Permission check (only ComponentAdmin can update metadata)
-    if !old_meta.has_permission(&payload.u, &Permission::ComponentAdmin) {
+    if !old_meta.has_permission(&user.username, &Permission::ComponentAdmin) {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1347,7 +1442,7 @@ pub async fn update_component_metadata(
 pub async fn get_component_metadata(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
-    Query(query): Query<BugQuery>,
+    user: RequestUser,
 ) -> Result<impl IntoResponse, StatusCode> {
     let path = {
         let cache = state.component_cache.lock().unwrap();
@@ -1355,7 +1450,7 @@ pub async fn get_component_metadata(
     };
     let resolved = resolve_component_metadata(&state.root, &path);
 
-    if !resolved.has_permission(&query.u, &Permission::ViewIssues) {
+    if !resolved.has_permission(&user.username, &Permission::ViewIssues) {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1373,7 +1468,7 @@ pub async fn get_component_metadata(
 /// 3. Return the collected summaries as JSON.
 pub async fn get_component_list(
     State(state): State<Arc<AppState>>,
-    Query(query): Query<BugQuery>,
+    user: RequestUser,
 ) -> impl IntoResponse {
     let mut summaries = Vec::new();
     let cache_data = {
@@ -1384,7 +1479,7 @@ pub async fn get_component_list(
     for (id, path_str) in cache_data {
         // Permission check on resolved metadata
         let resolved = resolve_component_metadata(&state.root, &path_str);
-        if !resolved.has_permission(&query.u, &Permission::ViewIssues) {
+        if !resolved.has_permission(&user.username, &Permission::ViewIssues) {
             continue;
         }
 
@@ -1536,12 +1631,13 @@ fn match_entry(search_query: &SearchString, metadata: &BugMetadata) -> bool {
 /// 3. Return the collected summaries as JSON.
 pub async fn get_bug_list(
     State(state): State<Arc<AppState>>,
+    user: RequestUser,
     Query(query): Query<SearchQuery>,
 ) -> impl IntoResponse {
     let mut summaries = Vec::new();
     let q_str = query.q.unwrap_or_default();
     let search_query: SearchString = SearchString::parse(&q_str);
-    let u = query.u;
+    let u = user.username.clone();
 
     for entry in WalkDir::new(&state.root)
         .into_iter()
@@ -1607,7 +1703,7 @@ pub async fn get_bug_list(
 pub async fn get_bug(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
-    Query(query): Query<BugQuery>,
+    user: RequestUser,
 ) -> Result<impl IntoResponse, StatusCode> {
     let bug_path = find_bug_path(&state, id).ok_or(StatusCode::NOT_FOUND)?;
 
@@ -1641,7 +1737,7 @@ pub async fn get_bug(
         )
     };
 
-    if metadata.access_level(&resolved_meta, &query.u) < UserAccessLevel::View {
+    if metadata.access_level(&resolved_meta, &user.username) < UserAccessLevel::View {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1682,7 +1778,7 @@ pub struct BugStateResponse {
 pub async fn get_bug_state(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
-    Query(query): Query<BugQuery>,
+    user: RequestUser,
 ) -> Result<impl IntoResponse, StatusCode> {
     let bug_path = find_bug_path(&state, id).ok_or(StatusCode::NOT_FOUND)?;
 
@@ -1699,7 +1795,7 @@ pub async fn get_bug_state(
         resolve_component_metadata(&state.root, &path)
     };
 
-    if metadata.access_level(&resolved_meta, &query.u) < UserAccessLevel::View {
+    if metadata.access_level(&resolved_meta, &user.username) < UserAccessLevel::View {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1709,12 +1805,13 @@ pub async fn get_bug_state(
 }
 
 /// Request payload for submitting a new comment.
+///
+/// There is deliberately no `author` field. It used to be client-supplied alongside a
+/// separate `u`, with nothing enforcing the two matched — so any caller could attribute
+/// a comment to someone else. The author is now taken from the authenticated token.
 #[derive(SerdeDeserialize)]
 pub struct CommentRequest {
-    pub author: String,
     pub content: String,
-    /// The username of the user making the request (must match author).
-    pub u: String,
 }
 
 /// Response payload for submitting a new comment.
@@ -1739,6 +1836,7 @@ pub struct SubmitCommentResponse {
 pub async fn submit_comment(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
+    user: RequestUser,
     Json(payload): Json<CommentRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let lock = state.get_bug_lock(id);
@@ -1758,7 +1856,7 @@ pub async fn submit_comment(
         resolve_component_metadata(&state.root, &path)
     };
 
-    if metadata.access_level(&resolved_meta, &payload.u) < UserAccessLevel::Comment {
+    if metadata.access_level(&resolved_meta, &user.username) < UserAccessLevel::Comment {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1778,7 +1876,7 @@ pub async fn submit_comment(
     let comment = Comment {
         version: CURRENT_VERSION,
         id: next_comment_id,
-        author: payload.author,
+        author: user.username.clone(),
         epoch_nanoseconds: now.as_nanos() as u64,
         content: payload.content,
     };
@@ -1802,8 +1900,6 @@ pub async fn submit_comment(
 pub struct MetadataChangeRequest {
     pub field: String,
     pub value: String,
-    /// The username of the user making the request.
-    pub u: String,
 }
 
 /// Response payload for changing bug metadata.
@@ -1827,6 +1923,7 @@ pub struct ChangeMetadataResponse {
 pub async fn update_bug_metadata(
     State(state): State<Arc<AppState>>,
     Path(id): Path<u32>,
+    user: RequestUser,
     Json(payload): Json<MetadataChangeRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let lock = state.get_bug_lock(id);
@@ -1846,7 +1943,7 @@ pub async fn update_bug_metadata(
         resolve_component_metadata(&state.root, &path)
     };
 
-    if metadata.access_level(&resolved_meta, &payload.u) < UserAccessLevel::Full {
+    if metadata.access_level(&resolved_meta, &user.username) < UserAccessLevel::Full {
         return Err(StatusCode::FORBIDDEN);
     }
 

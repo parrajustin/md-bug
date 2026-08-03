@@ -6,6 +6,18 @@ import { StatusError } from 'standard-ts-lib/src/status_error';
 const DB_NAME = 'md-bug-db';
 const STORE_NAME = 'settings';
 const USERNAME_KEY = 'username';
+const SESSION_KEY = 'session';
+
+/// The stored result of a successful login. Tokens live in IndexedDB rather than
+/// localStorage so they are not readable by a synchronous XSS one-liner, though a
+/// determined script on the page can still reach them — the real mitigations are the
+/// short access-token TTL and server-side revocation.
+export interface StoredSession {
+  accessToken: string;
+  refreshToken: string;
+  username: string;
+  isAdmin: boolean;
+}
 
 export class Storage {
   private db: IDBDatabase | null = null;
@@ -63,6 +75,55 @@ export class Storage {
         });
       }),
       'Failed to set username in storage'
+    );
+  }
+
+  async getSession(): Promise<Result<Optional<StoredSession>, StatusError>> {
+    return WrapPromise(
+      this.getDb().then((db) => {
+        return new Promise<Optional<StoredSession>>((resolve, reject) => {
+          const transaction = db.transaction(STORE_NAME, 'readonly');
+          const store = transaction.objectStore(STORE_NAME);
+          const request = store.get(SESSION_KEY);
+
+          request.onsuccess = () =>
+            resolve(WrapOptional(request.result as StoredSession | null));
+          request.onerror = () => reject(request.error);
+        });
+      }),
+      'Failed to read session from storage'
+    );
+  }
+
+  async setSession(session: StoredSession): Promise<StatusResult<StatusError>> {
+    return WrapPromise(
+      this.getDb().then((db) => {
+        return new Promise<unknown>((resolve, reject) => {
+          const transaction = db.transaction(STORE_NAME, 'readwrite');
+          const store = transaction.objectStore(STORE_NAME);
+          const request = store.put(session, SESSION_KEY);
+
+          request.onsuccess = () => resolve(Ok());
+          request.onerror = () => reject(request.error);
+        });
+      }),
+      'Failed to save session to storage'
+    );
+  }
+
+  async clearSession(): Promise<StatusResult<StatusError>> {
+    return WrapPromise(
+      this.getDb().then((db) => {
+        return new Promise<unknown>((resolve, reject) => {
+          const transaction = db.transaction(STORE_NAME, 'readwrite');
+          const store = transaction.objectStore(STORE_NAME);
+          const request = store.delete(SESSION_KEY);
+
+          request.onsuccess = () => resolve(Ok());
+          request.onerror = () => reject(request.error);
+        });
+      }),
+      'Failed to clear session from storage'
     );
   }
 

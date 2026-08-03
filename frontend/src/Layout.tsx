@@ -148,7 +148,7 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchVa
 
       const apiResult = get_api();
       if (apiResult.ok) {
-        const res = await apiResult.val.get_component_metadata(username, componentId);
+        const res = await apiResult.val.get_component_metadata(componentId);
         if (res.ok) {
           const meta = res.val;
           setCurrentComponentMeta(meta);
@@ -335,8 +335,8 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchVa
             onClose={handleCreateMenuClose}
             anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
             transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-            PaperProps={{
-              sx: { width: 218, mt: 0.5 }
+            slotProps={{
+              paper: { sx: { width: 218, mt: 0.5 } }
             }}
           >
             {/* 1) Create Issue in same component */}
@@ -390,9 +390,9 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchVa
                 <Box sx={{ mr: 2, display: 'flex', color: 'text.secondary' }}>
                   {item.icon}
                 </Box>
-                <ListItemText 
-                  primary={item.text} 
-                  primaryTypographyProps={{ fontSize: '0.9rem' }} 
+                <ListItemText
+                  primary={item.text}
+                  slotProps={{ primary: { sx: { fontSize: '0.9rem' } } }}
                 />
               </ListItemButton>
             </ListItem>
