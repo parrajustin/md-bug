@@ -37,10 +37,19 @@ cargo run --bin md-bug-backend -- -r ./bug-data -p 9000
 | `--CreateUser <name>` | `CREATE_USER` | — | Create a user (prompts for password), then **exit** |
 | `--CreateAdmin` | — | `false` | Make `--CreateUser`'s account an admin |
 
-On startup the server ensures `<root>/default/` exists — but it **never writes
-`component_metadata` there**, so `default/` stays invisible to `ComponentIdCache`
-(which only registers directories containing that file). An empty data dir therefore
-has *zero* usable components until you run `--CreateRootComponent`.
+On startup `api::ensure_default_component` creates a top-level component named
+**DEFAULT** at `<root>/default/`, owned by `--AdminUsername`, so a fresh data directory
+is usable immediately. It writes only when `default/component_metadata` is absent —
+restarts are no-ops, and ids never shift.
+
+This replaces older behaviour that created a bare `default/` directory and never wrote
+metadata into it. `ComponentIdCache::update_from_disk` only registers directories that
+*contain* `component_metadata`, so that folder was invisible and an empty data dir had
+zero usable components. Existing installs in that state are adopted on next start.
+
+Note `update_from_disk` also skips the empty relative path, so metadata written at the
+data-dir root itself would be ignored — the super root (id 0) is virtual and has no
+metadata on disk.
 
 ## Routes
 
@@ -129,7 +138,7 @@ confer Full access to bugs in the subtree.
 
 ### Root components
 
-Roots are created through their own admin-only endpoint, **`POST /api/create_root_component`**
+`DEFAULT` aside, additional roots are created through their own admin-only endpoint, **`POST /api/create_root_component`**
 (`{name, description}`), or the `--CreateRootComponent` CLI flag. Both write through
 `api::write_root_component`, so the CLI and the API cannot produce different ACLs.
 

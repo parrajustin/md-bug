@@ -45,15 +45,21 @@ origin. There is still **no `CorsLayer` installed**, so serving `frontend/public
 separately (e.g. `npm run serve`) breaks every call with a CORS error, not a useful
 status code.
 
-### First-run setup: you need a root component
+### First start is self-setting-up
 
-A fresh `backend/bug-data/` has no components, so there is nothing to nest under. An
-**administrator** can create one from the UI — *Create Component* → *Create as a root
-component* — which posts to the admin-only `/api/create_root_component`. Non-admins do
-not see the toggle.
+On first start the server creates a top-level component called **DEFAULT** (folder
+`default/`, `parent_id` 0), owned by the bootstrap admin. A fresh install is therefore
+immediately usable — you can file a bug and nest components without any manual step.
 
-Note that `create_component` still returns 403 for `parent_id == 0`; roots only come from
-the dedicated endpoint or the CLI. To bootstrap out-of-band:
+It is written only when `default/component_metadata` is missing, so restarts never
+duplicate or renumber it. That also self-heals older installs, which created an empty
+`default/` directory and never gave it metadata, leaving it invisible to
+`ComponentIdCache`.
+
+Additional roots: an **administrator** can create one from the UI — *Create Component* →
+*Create as a root component* — which posts to the admin-only `/api/create_root_component`.
+Non-admins do not see the toggle. `create_component` still returns 403 for
+`parent_id == 0`. To create one out-of-band:
 
 ```bash
 cd backend

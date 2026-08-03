@@ -11,6 +11,10 @@ This document serves as a high-signal knowledge base for AI agents and developer
   - `integration_tests/`: Jest-based tests that spawn the actual binary for end-to-end validation.
 
 ## Core Mandates & Constraints
+- **DEFAULT component:** A top-level component named `DEFAULT` (folder `default/`) is
+  created automatically on first start, owned by the bootstrap admin, so a fresh install
+  is usable straight away. Written only when its `component_metadata` is missing, so
+  restarts are no-ops. *(Added 2026-08-03.)*
 - **Root Protection:** Root components (parent 0) are created by an **administrator** via
   the dedicated `create_root_component` endpoint or the `--CreateRootComponent` CLI flag —
   never through `create_component`, which still rejects `parent_id` 0 unconditionally.

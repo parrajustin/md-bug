@@ -30,8 +30,10 @@ describe('CreateComponentView', () => {
     await renderWithProvidersAsync(<CreateComponentView username={TEST_USER} isAdmin={false} />);
 
     expect(screen.getByRole('button', { name: /create component/i })).toBeDisabled();
-    expect(screen.getByText(/only an administrator can create a root component/i))
-      .toBeInTheDocument();
+    // Both the empty-state alert and the field helper say this; scope to the alert.
+    expect(screen.getByTestId('no-components-notice')).toHaveTextContent(
+      /only an administrator can create a root component/i
+    );
   });
 
   it('hides the root toggle from non-admins', async () => {
