@@ -11,7 +11,10 @@ This document serves as a high-signal knowledge base for AI agents and developer
   - `integration_tests/`: Jest-based tests that spawn the actual binary for end-to-end validation.
 
 ## Core Mandates & Constraints
-- **Root Protection:** Root components (ID 1, 2, etc., with parent 0) **MUST** be created manually on disk; the API is strictly forbidden from creating them.
+- **Root Protection:** Root components (parent 0) are created by an **administrator** via
+  the dedicated `create_root_component` endpoint or the `--CreateRootComponent` CLI flag —
+  never through `create_component`, which still rejects `parent_id` 0 unconditionally.
+  *(Changed 2026-08-03; previously roots were manual-on-disk only.)*
 - **Bug IDs:** Numeric folder names in the filesystem are reserved for Bug IDs; components cannot have purely numeric names.
 - **Tiered Access:** Permissions are strictly linear: `Full Access` > `Comment Access` > `View Access`.
 - **Inheritance:** Components inherit permissions from their parents unless explicitly overridden in `component_metadata`.

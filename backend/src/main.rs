@@ -142,10 +142,15 @@ async fn main() -> anyhow::Result<()> {
     println!("Frontend directory: {:?}", args.frontend_dir);
     println!("Port: {:?}", args.port);
 
-    // Ensure the "default" directory exists within the root.
-    let default_dir = args.root.join("default");
-    if !default_dir.exists() {
-        fs::create_dir_all(&default_dir)?;
+    // Ensure a usable top-level component exists. A fresh install otherwise has nothing
+    // to nest under and nowhere to file a bug. Owned by the bootstrap admin, so the two
+    // first-start steps stay consistent.
+    match api::ensure_default_component(&args.root, &args.admin_username)? {
+        Some(id) => println!(
+            "Created default component '{}' with ID {}",
+            api::DEFAULT_COMPONENT_NAME, id
+        ),
+        None => tracing::debug!("default component already present"),
     }
 
     // Generate fake data if the flag is set.
@@ -208,6 +213,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/bug/:id/update_metadata", post(api::update_bug_metadata))
         .route("/api/component_list", get(api::get_component_list))
         .route("/api/create_component", post(api::create_component))
+        .route("/api/create_root_component", post(api::create_root_component))
         .route("/api/component/:id/get_metadata", get(api::get_component_metadata))
         .route("/api/component/:id/update_metadata", post(api::update_component_metadata))
         .route("/api/component/:id/add_template", post(api::add_template))
@@ -226,94 +232,26 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Bootstraps a root component from the CLI.
+///
+/// The actual disk write lives in `api::write_root_component`, shared with the
+/// `create_root_component` endpoint so the two cannot produce different ACLs.
 fn create_root_component(root: &Path, name: &str, admin_user_id: &str) -> anyhow::Result<()> {
-    let safe_name = api::sanitize_name(name);
-    let component_path = root.join(&safe_name);
-
-    if component_path.exists() {
-        anyhow::bail!("Component directory already exists: {:?}", component_path);
-    }
-
-    fs::create_dir_all(&component_path)?;
-
-    // Load ID cache and generate new ID
+    // Ids come from a scan of what is already on disk; there is no running server whose
+    // cache we could consult.
     let mut component_cache = ComponentIdCache::default();
-    component_cache.id_to_path.insert(0, "".to_string()); // Ensure root is known
+    component_cache.id_to_path.insert(0, "".to_string());
     component_cache.update_from_disk(root);
     let new_id = component_cache.get_next_id();
 
-    // Default groups setup (mirroring api.rs)
-    let mut groups = HashMap::new();
-    
-    // Component Admins
-    groups.insert("Component Admins".to_string(), api::GroupPermissions {
-        permissions: vec![
-            api::Permission::ComponentAdmin, api::Permission::CreateIssues, api::Permission::AdminIssues,
-            api::Permission::EditIssues, api::Permission::CommentOnIssues, api::Permission::ViewIssues
-        ],
-        view_level: 999,
-        members: vec![admin_user_id.to_string()],
-    });
+    let description = format!("Root component: {}", name);
+    let created = api::write_root_component(root, new_id, name, &description, admin_user_id)?;
 
-    // Issue Admins
-    groups.insert("Issue Admins".to_string(), api::GroupPermissions {
-        permissions: vec![
-            api::Permission::CreateIssues, api::Permission::AdminIssues,
-            api::Permission::EditIssues, api::Permission::CommentOnIssues, api::Permission::ViewIssues
-        ],
-        view_level: 500,
-        members: vec![],
-    });
-
-    // Issue Editors
-    groups.insert("Issue Editors".to_string(), api::GroupPermissions {
-        permissions: vec![
-            api::Permission::CreateIssues, api::Permission::EditIssues, 
-            api::Permission::CommentOnIssues, api::Permission::ViewIssues
-        ],
-        view_level: 100,
-        members: vec![],
-    });
-
-    // Issue Contributors
-    groups.insert("Issue Contributors".to_string(), api::GroupPermissions {
-        permissions: vec![
-            api::Permission::CreateIssues, api::Permission::CommentOnIssues, api::Permission::ViewIssues
-        ],
-        view_level: 1,
-        members: vec!["PUBLIC".to_string()],
-    });
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?;
-
-    let mut templates = HashMap::new();
-    templates.insert("".to_string(), api::BugTemplate::default());
-
-    let user_metadata: Vec<api::UserMetadataEntry> = vec![];
-
-    let meta = api::ComponentMetadata {
-        version: api::CURRENT_VERSION,
-        id: new_id,
-        name: name.to_string(),
-        description: format!("Root component: {}", name),
-        creator: admin_user_id.to_string(),
-        bug_type: None,
-        priority: None,
-        severity: None,
-        verifier: None,
-        collaborators: vec![],
-        cc: vec![],
-        access_control: api::AccessControl { groups },
-        templates,
-        default_template: "".to_string(),
-        user_metadata,
-        created_at: now.as_nanos() as u64,
-    };
-
-    let bytes = rkyv::to_bytes::<_, 2048>(&meta).map_err(|e| anyhow::anyhow!("Serialization error: {:?}", e))?;
-    fs::write(component_path.join("component_metadata"), bytes)?;
-
-    println!("Successfully created root component '{}' with ID {} at {:?}", name, new_id, component_path);
+    println!(
+        "Successfully created root component '{}' with ID {} at {:?}",
+        name,
+        new_id,
+        root.join(created)
+    );
     Ok(())
 }

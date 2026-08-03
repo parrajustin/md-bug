@@ -837,9 +837,277 @@ pub fn sanitize_name(name: &str) -> String {
         .collect()
 }
 
-/// Creates a new component.
-/// NOTE: Creating components at the root level via the API is STRICTLY FORBIDDEN.
-/// NO BOOTSTRAP LOGIC IS ALLOWED. ROOT COMPONENTS ARE MANUAL ONLY.
+/// Builds the default permission groups for a brand-new root component.
+///
+/// A root has no parent to inherit from, so unlike `create_component` — which clones the
+/// parent's groups — the whole ACL has to be synthesised. `admin_user_id` becomes the
+/// sole Component Admin; `PUBLIC` gets contributor rights so the component is usable by
+/// everyone else out of the box.
+pub fn default_root_groups(admin_user_id: &str) -> HashMap<String, GroupPermissions> {
+    let mut groups = HashMap::new();
+    groups.insert(
+        "Component Admins".to_string(),
+        GroupPermissions {
+            permissions: vec![
+                Permission::ComponentAdmin,
+                Permission::CreateIssues,
+                Permission::AdminIssues,
+                Permission::EditIssues,
+                Permission::CommentOnIssues,
+                Permission::ViewIssues,
+            ],
+            view_level: 999,
+            members: vec![admin_user_id.to_string()],
+        },
+    );
+    groups.insert(
+        "Issue Admins".to_string(),
+        GroupPermissions {
+            permissions: vec![
+                Permission::CreateIssues,
+                Permission::AdminIssues,
+                Permission::EditIssues,
+                Permission::CommentOnIssues,
+                Permission::ViewIssues,
+            ],
+            view_level: 500,
+            members: vec![],
+        },
+    );
+    groups.insert(
+        "Issue Editors".to_string(),
+        GroupPermissions {
+            permissions: vec![
+                Permission::CreateIssues,
+                Permission::EditIssues,
+                Permission::CommentOnIssues,
+                Permission::ViewIssues,
+            ],
+            view_level: 100,
+            members: vec![],
+        },
+    );
+    groups.insert(
+        "Issue Contributors".to_string(),
+        GroupPermissions {
+            permissions: vec![
+                Permission::CreateIssues,
+                Permission::CommentOnIssues,
+                Permission::ViewIssues,
+            ],
+            view_level: 1,
+            members: vec!["PUBLIC".to_string()],
+        },
+    );
+    groups
+}
+
+/// Writes a root component directory and its `component_metadata` to disk.
+///
+/// Shared by the `--CreateRootComponent` CLI flag and the `create_root_component`
+/// endpoint so the two can never drift apart. It does **not** touch any in-memory cache;
+/// callers that have one are responsible for registering `id` themselves.
+///
+/// Returns the relative path that was created.
+pub fn write_root_component(
+    root: &std::path::Path,
+    id: u32,
+    name: &str,
+    description: &str,
+    admin_user_id: &str,
+) -> anyhow::Result<String> {
+    // `sanitize_name` maps every non-alphanumeric character to '_', so a name like
+    // "!!!" survives as "___" rather than becoming empty. Require a real character.
+    if !name.chars().any(|c| c.is_alphanumeric()) {
+        anyhow::bail!("Component name must contain at least one alphanumeric character");
+    }
+    let safe_name = sanitize_name(name);
+
+    let component_path = root.join(&safe_name);
+    if component_path.exists() {
+        anyhow::bail!("Component directory already exists: {:?}", component_path);
+    }
+
+    write_component_metadata_at(&component_path, id, name, description, admin_user_id)?;
+    Ok(safe_name)
+}
+
+/// Writes a root-style `component_metadata` into `component_path`, creating the
+/// directory if needed.
+///
+/// Unlike `write_root_component` this does **not** refuse an existing directory, which is
+/// what lets `ensure_default_component` adopt the empty `default/` folder that older
+/// builds left behind.
+pub fn write_component_metadata_at(
+    component_path: &std::path::Path,
+    id: u32,
+    name: &str,
+    description: &str,
+    admin_user_id: &str,
+) -> anyhow::Result<()> {
+    std::fs::create_dir_all(component_path)?;
+
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
+
+    let mut templates = HashMap::new();
+    templates.insert("".to_string(), BugTemplate::default());
+
+    let meta = ComponentMetadata {
+        version: CURRENT_VERSION,
+        id,
+        name: name.to_string(),
+        description: description.to_string(),
+        creator: admin_user_id.to_string(),
+        bug_type: None,
+        priority: None,
+        severity: None,
+        verifier: None,
+        collaborators: vec![],
+        cc: vec![],
+        access_control: AccessControl {
+            groups: default_root_groups(admin_user_id),
+        },
+        templates,
+        default_template: "".to_string(),
+        user_metadata: vec![],
+        created_at: now.as_nanos() as u64,
+    };
+
+    let bytes = rkyv::to_bytes::<_, 2048>(&meta)
+        .map_err(|e| anyhow::anyhow!("Serialization error: {:?}", e))?;
+    std::fs::write(component_path.join("component_metadata"), bytes)?;
+    Ok(())
+}
+
+/// The display name and folder of the component created automatically on first start.
+pub const DEFAULT_COMPONENT_NAME: &str = "DEFAULT";
+pub const DEFAULT_COMPONENT_DIR: &str = "default";
+
+/// Ensures a usable top-level component exists, so a fresh install is not a dead end.
+///
+/// Without this a new deployment has zero components: nothing to nest under, nowhere to
+/// file a bug, and the only way forward is an admin creating a root by hand. `DEFAULT` is
+/// an ordinary top-level component (its own id, `parent_id` 0) — the super root stays
+/// virtual.
+///
+/// Runs on every start, but only writes when `default/component_metadata` is missing.
+/// That makes it self-healing: older builds created an empty `default/` directory and
+/// never gave it metadata, so it was invisible to `ComponentIdCache`. Those installs get
+/// adopted rather than left broken.
+///
+/// Returns the id it assigned, or `None` if DEFAULT was already present.
+pub fn ensure_default_component(
+    root: &std::path::Path,
+    admin_user_id: &str,
+) -> anyhow::Result<Option<u32>> {
+    let component_path = root.join(DEFAULT_COMPONENT_DIR);
+    if component_path.join("component_metadata").exists() {
+        return Ok(None);
+    }
+
+    // Take the next free id from what is already on disk, so adopting an empty
+    // `default/` in an install that already has other components cannot collide.
+    let mut cache = crate::component_id_cache::ComponentIdCache::default();
+    cache.id_to_path.insert(0, "".to_string());
+    cache.update_from_disk(root);
+    let id = cache.get_next_id();
+
+    write_component_metadata_at(
+        &component_path,
+        id,
+        DEFAULT_COMPONENT_NAME,
+        "Default component, created automatically on first start.",
+        admin_user_id,
+    )?;
+
+    Ok(Some(id))
+}
+
+/// Request payload for creating a root-level component.
+#[derive(SerdeDeserialize)]
+pub struct CreateRootComponentRequest {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// Creates a component at the root of the hierarchy. **Admin only.**
+///
+/// This is deliberately a separate endpoint from `create_component`, which still rejects
+/// `parent_id == 0` unconditionally. Root creation is rare, privileged, and cannot
+/// inherit permissions from anywhere — folding it into the normal path would mean every
+/// ordinary component creation carried a code path that answers to nobody's ACL. Keeping
+/// them apart means the common endpoint has no root branch to get wrong.
+///
+/// Authorization is `is_admin` on the account, not a component ACL: there is no parent
+/// component whose permissions could be consulted.
+pub async fn create_root_component(
+    State(state): State<Arc<AppState>>,
+    user: RequestUser,
+    Json(payload): Json<CreateRootComponentRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    if !user.is_admin {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if payload.name.trim().is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    // Serialise root creation against component 0 so two concurrent requests cannot
+    // allocate the same id or race on the same directory name.
+    let lock = state.get_component_lock(0);
+    let _guard = lock.lock().await;
+
+    // See `write_root_component`: a punctuation-only name sanitises to underscores, not
+    // to an empty string, so emptiness is not a sufficient check.
+    if !payload.name.chars().any(|c| c.is_alphanumeric()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let safe_name = sanitize_name(&payload.name);
+    if state.root.join(&safe_name).exists() {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    let new_id = {
+        let cache = state
+            .component_cache
+            .lock()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        cache.get_next_id()
+    };
+
+    let description = if payload.description.trim().is_empty() {
+        format!("Root component: {}", payload.name)
+    } else {
+        payload.description.clone()
+    };
+
+    let created = write_root_component(
+        &state.root,
+        new_id,
+        &payload.name,
+        &description,
+        &user.username,
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Register it so the component list reflects the new root without a restart.
+    {
+        let mut cache = state
+            .component_cache
+            .lock()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        cache.insert(new_id, created);
+    }
+
+    Ok((StatusCode::CREATED, Json(new_id)))
+}
+
+/// Creates a new component beneath an existing parent.
+///
+/// NOTE: this endpoint still refuses `parent_id == 0`. Root components are created
+/// through the separate admin-only `create_root_component` endpoint (or the
+/// `--CreateRootComponent` CLI flag); there is no bootstrap path here.
 ///
 /// Process:
 /// 1. Resolve the parent's hierarchical path using the `parent_id` and the component cache.

@@ -1,6 +1,6 @@
 import { type Result, Ok, Err } from 'standard-ts-lib/src/result';
 import { StatusError, NotFoundError } from 'standard-ts-lib/src/status_error';
-import type { API, Bug, BugSummary, ComponentSummary, ChangeMetadataResponse, SubmitCommentResponse, BugStateResponse, ComponentMetadata, BugTemplate, CreateComponentRequest, CreateBugRequest, Permission, TemplateAccess } from './api';
+import type { API, Bug, BugSummary, ComponentSummary, ChangeMetadataResponse, SubmitCommentResponse, BugStateResponse, ComponentMetadata, BugTemplate, CreateComponentRequest, CreateRootComponentRequest, CreateBugRequest, Permission, TemplateAccess } from './api';
 
 export class FakeApi implements API {
   private mockBugs: Bug[] = [
@@ -203,6 +203,12 @@ export class FakeApi implements API {
 
   async create_component(request: CreateComponentRequest): Promise<Result<void, StatusError>> {
     return Ok(undefined);
+  }
+
+  async create_root_component(_request: CreateRootComponentRequest): Promise<Result<number, StatusError>> {
+    // The fake's component list is a fixed literal, so there is nothing to append to;
+    // returning a plausible id is enough for UI work.
+    return Ok(99);
   }
 
   async create_bug(request: CreateBugRequest): Promise<Result<number, StatusError>> {

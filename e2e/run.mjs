@@ -114,6 +114,23 @@ async function freezeAnimations(page) {
   });
 }
 
+/// Reads the access token the page is holding, so assertions can call the API as the
+/// same user the browser is signed in as.
+async function readAccessToken(page) {
+  return page.evaluate(async () => {
+    return new Promise((resolve) => {
+      const open = indexedDB.open('md-bug-db', 1);
+      open.onsuccess = () => {
+        const db = open.result;
+        const req = db.transaction('settings', 'readonly').objectStore('settings').get('session');
+        req.onsuccess = () => resolve(req.result?.accessToken ?? '');
+        req.onerror = () => resolve('');
+      };
+      open.onerror = () => resolve('');
+    });
+  });
+}
+
 let stepCounter = 0;
 const results = [];
 
@@ -255,6 +272,35 @@ async function main() {
     await page.reload({ waitUntil: 'networkidle0' });
     await page.waitForSelector('header', { timeout: 15_000 });
     await capture(page, 'session-persists-after-reload');
+
+    // ---- Step 8: an admin sees the root-component toggle ------------------------
+    await page.goto(`${base}/create_component`, { waitUntil: 'networkidle0' });
+    await page.waitForSelector('[data-testid="root-toggle"]');
+    await capture(page, 'create-component-admin');
+
+    // ---- Step 9: toggling it replaces the parent picker -------------------------
+    await page.click('[data-testid="root-toggle"]');
+    await page.waitForSelector('[data-testid="root-mode-notice"]');
+    await capture(page, 'root-toggle-on');
+
+    // ---- Step 10: creating a root component actually works ---------------------
+    await page.type('[data-testid="component-name"]', 'e2e_root');
+    await page.click('button::-p-text(Create Component)');
+    await page.waitForNetworkIdle({ idleTime: 500 }).catch(() => {});
+    await page.waitForSelector('header', { timeout: 15_000 });
+    await capture(page, 'after-creating-root');
+
+    // Confirm it landed server-side rather than trusting the screenshot.
+    const listResp = await fetch(`${base}/api/component_list`, {
+      headers: { Authorization: `Bearer ${await readAccessToken(page)}` },
+    });
+    const components = await listResp.json();
+    if (!Array.isArray(components) || !components.some((c) => c.name === 'e2e_root')) {
+      throw new Error(
+        `expected a root component named e2e_root, got ${JSON.stringify(components)}`
+      );
+    }
+    log('behaviour       root component created via the API and listed');
 
     // Assert on behaviour too, not only on pixels: a screenshot cannot tell us the old
     // password stopped working.

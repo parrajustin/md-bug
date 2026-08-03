@@ -37,10 +37,14 @@ This document captures the architectural decisions, conventions, and "tribal kno
 ### API Design
 - **State Identification:** Every bug and component has a `state_id` (represented as `u64` in Rust, `bigint` in TS). This must be incremented on every modification to support frontend caching and optimistic concurrency.
 - **Username Requirement:** Most API calls require a `u` (username) parameter for access control enforcement.
-- **Root Protection (STRICT):** Creation of components at the absolute root via the API is **STRICTLY FORBIDDEN**. NO BOOTSTRAP LOGIC IS ALLOWED IN THE API TO CIRCUMVENT THIS. Root components must be bootstrapped via manual disk configuration (creating the folder and `component_metadata` file manually). Any attempt to create a component with `parent_id` 0 or equivalent via the API must be rejected.
-- **NO ROOT CREATION:** To be clear, the API must NEVER create a component at the root. Root components are strictly manual.
-- **STRICT FORBIDDEN:** Creating components at the root level via the API is strictly banned. NO EXCEPTIONS.
-- **MANUAL ONLY:** Root components must be created by an administrator directly on the server's filesystem.
+- **Root Protection:** `create_component` must **always** reject `parent_id` 0. Do not add
+  a bootstrap path to it. Root components are created only through the dedicated
+  admin-only `create_root_component` endpoint or the `--CreateRootComponent` CLI flag,
+  both of which go through `api::write_root_component`.
+  *(Revised 2026-08-03: this previously read "STRICTLY FORBIDDEN / NO EXCEPTIONS / manual
+  disk configuration only". Root creation is now permitted for administrators via its own
+  endpoint. The ban on doing it through `create_component` still stands — that separation
+  is the point, so the ordinary path has no privileged branch.)*
 
 ### Serialization (The "n" Suffix)
 - Rust `u64` fields are serialized to JSON as strings with an "n" suffix (e.g., `"123n"`).

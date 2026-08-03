@@ -613,3 +613,271 @@ async fn test_get_bug_list_expanded() -> anyhow::Result<()> {
     
     Ok(())
 }
+
+/// Builds an empty state rooted at `root`, with only the implicit root id registered.
+async fn empty_state(root: &StdPath) -> Arc<AppState> {
+    let mut component_cache = ComponentIdCache::default();
+    component_cache.insert(0, "".to_string());
+    Arc::new(AppState {
+        root: root.to_path_buf(),
+        bug_cache: BugIdCache::new(),
+        component_cache: Mutex::new(component_cache),
+        bug_locks: Mutex::new(HashMap::new()),
+        component_locks: Mutex::new(HashMap::new()),
+        users: test_user_manager(root).await,
+    })
+}
+
+#[tokio::test]
+async fn root_component_creation_requires_admin() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let state = empty_state(dir.path()).await;
+
+    let res = create_root_component(
+        State(state.clone()),
+        RequestUser::local("regular_user", 2, /*is_admin=*/ false),
+        Json(CreateRootComponentRequest {
+            name: "Sneaky".to_string(),
+            description: String::new(),
+        }),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    assert!(
+        !dir.path().join("sneaky").exists(),
+        "a rejected request must not leave a directory behind"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn admin_can_create_a_root_component() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let root = dir.path();
+    let state = empty_state(root).await;
+
+    let res = create_root_component(
+        State(state.clone()),
+        RequestUser::local("admin", 1, /*is_admin=*/ true),
+        Json(CreateRootComponentRequest {
+            name: "My Project".to_string(),
+            description: "Top level".to_string(),
+        }),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(res.status(), StatusCode::CREATED);
+    assert!(root.join("my_project").join("component_metadata").exists());
+
+    // The new root must be visible immediately, without a server restart.
+    let cache = state.component_cache.lock().unwrap();
+    assert!(
+        cache.id_to_path.values().any(|p| p == "my_project"),
+        "the new root should be registered in the component cache"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn root_component_grants_admin_rights_to_its_creator() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let root = dir.path();
+    let state = empty_state(root).await;
+
+    create_root_component(
+        State(state.clone()),
+        RequestUser::local("admin", 1, true),
+        Json(CreateRootComponentRequest {
+            name: "Proj".to_string(),
+            description: String::new(),
+        }),
+    )
+    .await
+    .into_response();
+
+    let meta = resolve_component_metadata(root, "proj");
+    assert!(
+        meta.has_permission("admin", &Permission::ComponentAdmin),
+        "the creating admin should hold ComponentAdmin on the new root"
+    );
+    assert!(
+        !meta.has_permission("someone_else", &Permission::ComponentAdmin),
+        "an unrelated user must not inherit admin rights"
+    );
+    // PUBLIC keeps contributor access so the component is usable straight away.
+    assert!(meta.has_permission("someone_else", &Permission::CreateIssues));
+    Ok(())
+}
+
+#[tokio::test]
+async fn duplicate_root_component_names_conflict() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let state = empty_state(dir.path()).await;
+
+    let make = |name: &str| {
+        let state = state.clone();
+        let name = name.to_string();
+        async move {
+            create_root_component(
+                State(state),
+                RequestUser::local("admin", 1, true),
+                Json(CreateRootComponentRequest {
+                    name,
+                    description: String::new(),
+                }),
+            )
+            .await
+            .into_response()
+            .status()
+        }
+    };
+
+    assert_eq!(make("Duplicate").await, StatusCode::CREATED);
+    assert_eq!(make("Duplicate").await, StatusCode::CONFLICT);
+    // Sanitisation collapses these to the same folder name, so it must also conflict.
+    assert_eq!(make("duplicate").await, StatusCode::CONFLICT);
+    Ok(())
+}
+
+#[tokio::test]
+async fn root_component_rejects_empty_and_unusable_names() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let state = empty_state(dir.path()).await;
+
+    for name in ["", "   ", "!!!", "///"] {
+        let status = create_root_component(
+            State(state.clone()),
+            RequestUser::local("admin", 1, true),
+            Json(CreateRootComponentRequest {
+                name: name.to_string(),
+                description: String::new(),
+            }),
+        )
+        .await
+        .into_response()
+        .status();
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "name {name:?} sanitises to nothing usable and must be rejected"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn create_component_still_refuses_parent_zero_even_for_admins() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let state = empty_state(dir.path()).await;
+
+    // The dedicated endpoint is the only way in; the ordinary one keeps its hard ban so
+    // there is exactly one code path that can produce a root.
+    let res = create_component(
+        State(state.clone()),
+        RequestUser::local("admin", 1, /*is_admin=*/ true),
+        Json(CreateComponentRequest {
+            name: "Backdoor".to_string(),
+            description: String::new(),
+            parent_id: 0,
+        }),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    Ok(())
+}
+
+#[tokio::test]
+async fn creates_the_default_component_on_a_fresh_root() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let root = dir.path();
+
+    let id = ensure_default_component(root, "admin")?.expect("should create DEFAULT");
+    assert_eq!(id, 1, "the first component on an empty root gets id 1");
+
+    let meta_path = root.join(DEFAULT_COMPONENT_DIR).join("component_metadata");
+    assert!(meta_path.exists());
+
+    let meta = resolve_component_metadata(root, DEFAULT_COMPONENT_DIR);
+    assert_eq!(meta.name, DEFAULT_COMPONENT_NAME);
+    assert!(
+        meta.has_permission("admin", &Permission::ComponentAdmin),
+        "the bootstrap admin should administer DEFAULT"
+    );
+    assert!(
+        meta.has_permission("anyone", &Permission::CreateIssues),
+        "PUBLIC keeps contributor rights so the component is usable immediately"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn default_component_creation_is_idempotent() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let root = dir.path();
+
+    assert_eq!(ensure_default_component(root, "admin")?, Some(1));
+    // A restart must not create a second one or renumber the first.
+    assert_eq!(ensure_default_component(root, "admin")?, None);
+    assert_eq!(ensure_default_component(root, "someone_else")?, None);
+
+    let meta = resolve_component_metadata(root, DEFAULT_COMPONENT_DIR);
+    assert!(
+        meta.has_permission("admin", &Permission::ComponentAdmin),
+        "the original owner must survive later starts under a different admin name"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn adopts_an_existing_empty_default_directory() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let root = dir.path();
+
+    // Older builds created `default/` but never wrote metadata into it, leaving it
+    // invisible to the component cache. The directory must be adopted, not rejected.
+    fs::create_dir_all(root.join(DEFAULT_COMPONENT_DIR))?;
+
+    let id = ensure_default_component(root, "admin")?.expect("should adopt the empty dir");
+    assert_eq!(id, 1);
+    assert!(root
+        .join(DEFAULT_COMPONENT_DIR)
+        .join("component_metadata")
+        .exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn default_component_does_not_collide_with_existing_components() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let root = dir.path();
+
+    // An install that already has roots but no DEFAULT must not reuse a taken id.
+    write_root_component(root, 1, "First", "", "admin")?;
+    write_root_component(root, 2, "Second", "", "admin")?;
+
+    let id = ensure_default_component(root, "admin")?.expect("should create DEFAULT");
+    assert_eq!(id, 3, "must take the next free id, not collide with 1 or 2");
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_default_component_is_visible_to_the_component_cache() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let root = dir.path();
+
+    ensure_default_component(root, "admin")?;
+
+    let mut cache = ComponentIdCache::default();
+    cache.update_from_disk(root);
+
+    assert!(
+        cache.id_to_path.values().any(|p| p == DEFAULT_COMPONENT_DIR),
+        "DEFAULT must be registered, unlike the metadata-less directory it replaces"
+    );
+    Ok(())
+}

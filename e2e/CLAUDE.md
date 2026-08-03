@@ -37,9 +37,13 @@ Steps, in capture order:
 | 5 | `back-to-login-after-change` | A successful change revokes the session and returns to sign-in |
 | 6 | `signed-in-home` | The new password works and the app renders |
 | 7 | `session-persists-after-reload` | The stored session survives a reload |
+| 8 | `create-component-admin` | An admin sees the root-component toggle |
+| 9 | `root-toggle-on` | Toggling it replaces the parent picker with an ownership warning |
+| 10 | `after-creating-root` | The new root is created and listed without a restart |
 
-It also asserts non-visual behaviour that a screenshot cannot capture: after rotation the
-original bootstrap password must be rejected with 401.
+It also asserts non-visual behaviour a screenshot cannot capture: the root component
+really exists in `/api/component_list` afterwards, and the original bootstrap password is
+rejected with 401 once rotated.
 
 ## Goldens
 

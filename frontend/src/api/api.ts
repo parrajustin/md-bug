@@ -154,6 +154,11 @@ export interface CreateBugRequest {
   cc: string[];
 }
 
+export interface CreateRootComponentRequest {
+  name: string;
+  description: string;
+}
+
 export interface CreateComponentRequest {
   name: string;
   description: string;
@@ -231,6 +236,9 @@ export interface API {
   modify_template(id: number, old_name: string, template: BugTemplate): Promise<Result<void, StatusError>>;
   delete_template(id: number, name: string): Promise<Result<void, StatusError>>;
   create_component(request: CreateComponentRequest): Promise<Result<void, StatusError>>;
+  /// Admin-only. Root components have no parent to inherit permissions from, so this is
+  /// a separate endpoint from `create_component`, which still rejects `parent_id: 0`.
+  create_root_component(request: CreateRootComponentRequest): Promise<Result<number, StatusError>>;
   create_bug(request: CreateBugRequest): Promise<Result<number, StatusError>>;
 }
 

@@ -18,6 +18,7 @@ import {
   type ComponentSummary,
   type CreateBugRequest,
   type CreateComponentRequest,
+  type CreateRootComponentRequest,
   type SubmitCommentResponse,
 } from '../api/api';
 
@@ -141,6 +142,8 @@ export function makeStubApi(overrides: Partial<API> = {}): API {
     modify_template: async (_i: number, _o: string, _t: BugTemplate) => Ok(undefined),
     delete_template: async (): Promise<Result<void, StatusError>> => Ok(undefined),
     create_component: async (_r: CreateComponentRequest) => Ok(undefined),
+    create_root_component: async (_r: CreateRootComponentRequest): Promise<Result<number, StatusError>> =>
+      Ok(7),
     create_bug: async (_r: CreateBugRequest): Promise<Result<number, StatusError>> => Ok(99),
   };
   return { ...base, ...overrides };

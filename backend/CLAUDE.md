@@ -62,6 +62,7 @@ GET  /api/component_list                    POST /api/create_component
 GET  /api/component/:id/get_metadata        POST /api/component/:id/update_metadata
 POST /api/component/:id/add_template        POST /api/component/:id/modify_template
 POST /api/component/:id/delete_template
+POST /api/create_root_component                                           (admin only)
 ```
 
 Note the method matters: `create_component` is `post` only, so a GET yields **405**, not 403.
@@ -126,11 +127,29 @@ Access is strictly tiered: **Full > Comment > View**, each implying the ones bel
 grants **no** rights over bugs inside it — that's `AdminIssues`/`EditIssues`, which do
 confer Full access to bugs in the subtree.
 
+### Root components
+
+Roots are created through their own admin-only endpoint, **`POST /api/create_root_component`**
+(`{name, description}`), or the `--CreateRootComponent` CLI flag. Both write through
+`api::write_root_component`, so the CLI and the API cannot produce different ACLs.
+
+Authorization is the account's `is_admin` flag, not a component ACL — a root has no
+parent whose permissions could be consulted. The creating admin becomes the sole
+Component Admin; `PUBLIC` gets contributor rights.
+
+`create_component` **still refuses `parent_id == 0` unconditionally, even for admins.**
+Keeping the two apart means the ordinary path has no root branch to get wrong, and there
+is exactly one code path that can produce a root. Do not add a bootstrap shortcut to
+`create_component`.
+
+Name validation is stricter than it looks: `sanitize_name` maps every non-alphanumeric
+character to `_`, so `"!!!"` becomes `"___"` rather than an empty string. Both entry
+points therefore require at least one alphanumeric character, not merely a non-empty
+result.
+
 ### The two 403s in `create_component`
 
-1. `parent_id == 0` → unconditional 403. Root creation via the API is a **hard mandate**;
-   do not add bootstrap logic to circumvent it, no matter how convenient. Root components
-   are created on disk only (`--CreateRootComponent`, see above).
+1. `parent_id == 0` → unconditional 403 (see above).
 2. Caller lacks `ComponentAdmin` on the resolved parent metadata.
 
 Both are covered by `src/api/api_test.rs`.

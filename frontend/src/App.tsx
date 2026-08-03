@@ -229,7 +229,7 @@ const App: React.FC = () => {
           <Route path="/home" element={<HomeView onBugSelect={handleBugClick} username={username} search={searchQuery} onSearch={handleSearch} />} />
           <Route path="/issue/:id" element={<BugLoader currentResult={bugResult} setResult={setBugResult} username={username} onSearch={handleSearch} onBugIdChange={setActiveBugId} />} />
           <Route path="/create_issue" element={<CreateIssueView username={username} />} />
-          <Route path="/create_component" element={<CreateComponentView username={username} />} />
+          <Route path="/create_component" element={<CreateComponentView username={username} isAdmin={session.isAdmin} />} />
           <Route path="/component/:id" element={<ComponentEditorView username={username} />} />
           <Route path="/login" element={<LoginView onLogin={handleLogin} />} />
         </Routes>

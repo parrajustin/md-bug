@@ -19,6 +19,7 @@ import {
   type ComponentMetadata,
   type BugTemplate,
   type CreateComponentRequest,
+  type CreateRootComponentRequest,
   type CreateBugRequest,
   bigIntReviver,
   bigIntReplacer,
@@ -227,6 +228,17 @@ export class BackendApi implements API {
       { method: 'POST', body: request },
       'Failed to create component',
       false
+    );
+  }
+
+  async create_root_component(
+    request: CreateRootComponentRequest
+  ): Promise<Result<number, StatusError>> {
+    return this.request(
+      '/api/create_root_component',
+      { method: 'POST', body: request },
+      'Failed to create root component',
+      true
     );
   }
 
