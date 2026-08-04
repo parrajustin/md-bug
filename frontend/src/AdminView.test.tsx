@@ -24,6 +24,7 @@ describe('AdminView', () => {
     setActiveSession(testSession);
     jest.restoreAllMocks();
     jest.spyOn(authApi, 'listUsers').mockResolvedValue(Ok(users));
+    jest.spyOn(authApi, 'listAllTokens').mockResolvedValue(Ok([]));
   });
 
   it('lists every account with its status', async () => {
@@ -136,5 +137,110 @@ describe('AdminView', () => {
     await userEvent.click(screen.getByTestId('toggle-disabled-bob'));
 
     expect(await screen.findByTestId('admin-error')).toHaveTextContent(/not permitted/i);
+  });
+});
+
+describe('AdminView sessions and tokens', () => {
+  const tokens = [
+    {
+      id: 1,
+      username: TEST_USER,
+      kind: 'Access',
+      label: null,
+      identity: null,
+      created_at: 0,
+      expires_at: 100,
+    },
+    {
+      id: 2,
+      username: 'bob',
+      kind: 'Api',
+      label: 'cat_fox_owl',
+      identity: null,
+      created_at: 0,
+      expires_at: null,
+    },
+    {
+      id: 3,
+      username: 'bob',
+      kind: 'Bot',
+      label: 'bob--cat_fox_owl',
+      identity: 'bob--cat_fox_owl',
+      created_at: 0,
+      expires_at: null,
+    },
+  ];
+
+  beforeEach(() => {
+    useStubApi();
+    setActiveSession(testSession);
+    jest.restoreAllMocks();
+    jest.spyOn(authApi, 'listUsers').mockResolvedValue(Ok(users));
+    jest.spyOn(authApi, 'listAllTokens').mockResolvedValue(Ok(tokens));
+  });
+
+  it('lists every credential across all users', async () => {
+    await renderWithProvidersAsync(<AdminView username={TEST_USER} />);
+
+    expect(screen.getByTestId('token-row-1')).toHaveTextContent(TEST_USER);
+    expect(screen.getByTestId('token-row-2')).toHaveTextContent('bob');
+    expect(screen.getByTestId('token-row-3')).toHaveTextContent('bob--cat_fox_owl');
+  });
+
+  it('names the kinds the way an operator would', async () => {
+    await renderWithProvidersAsync(<AdminView username={TEST_USER} />);
+
+    // The wire values are Rust enum names; "Access" means a live login.
+    expect(screen.getByTestId('token-row-1')).toHaveTextContent('Session');
+    expect(screen.getByTestId('token-row-2')).toHaveTextContent('API token');
+    expect(screen.getByTestId('token-row-3')).toHaveTextContent('Bot');
+  });
+
+  it("revokes another user's session", async () => {
+    const revoke = jest
+      .spyOn(authApi, 'adminRevokeToken')
+      .mockResolvedValue(Ok(undefined));
+    await renderWithProvidersAsync(<AdminView username={TEST_USER} />);
+
+    await userEvent.click(screen.getByTestId('revoke-token-2'));
+
+    // Ownership is deliberately not a constraint here: cutting off someone else's
+    // compromised credential is the whole point of the console.
+    await waitFor(() =>
+      expect(revoke).toHaveBeenCalledWith(testSession.accessToken, 2)
+    );
+  });
+
+  it('surfaces a failed revoke', async () => {
+    jest
+      .spyOn(authApi, 'adminRevokeToken')
+      .mockResolvedValue(Err(PermissionDeniedError('Not permitted')));
+    await renderWithProvidersAsync(<AdminView username={TEST_USER} />);
+
+    await userEvent.click(screen.getByTestId('revoke-token-1'));
+
+    expect(await screen.findByTestId('admin-error')).toHaveTextContent(/not permitted/i);
+  });
+
+  it('refreshes the token list after disabling an account', async () => {
+    const listAllTokens = jest.spyOn(authApi, 'listAllTokens').mockResolvedValue(Ok(tokens));
+    jest.spyOn(authApi, 'setUserDisabled').mockResolvedValue(Ok(undefined));
+    await renderWithProvidersAsync(<AdminView username={TEST_USER} />);
+
+    const before = listAllTokens.mock.calls.length;
+    await userEvent.click(screen.getByTestId('toggle-disabled-bob'));
+
+    // Disabling revokes that account's tokens, so a stale list would show sessions that
+    // no longer work.
+    await waitFor(() =>
+      expect(listAllTokens.mock.calls.length).toBeGreaterThan(before)
+    );
+  });
+
+  it('says so when there is nothing to show', async () => {
+    jest.spyOn(authApi, 'listAllTokens').mockResolvedValue(Ok([]));
+    await renderWithProvidersAsync(<AdminView username={TEST_USER} />);
+
+    expect(screen.getByTestId('no-tokens')).toBeInTheDocument();
   });
 });

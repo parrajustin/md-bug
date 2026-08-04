@@ -374,6 +374,7 @@ async function main() {
 
     // ---- Step 13: changing the password from the account page ------------------
     const ACCOUNT_PASSWORD = 'changed-from-account-1';
+    let NEWBIE_PASSWORD = '';
     await page.type('[data-testid="account-current-password"]', NEW_ADMIN_PASSWORD);
     await page.type('[data-testid="account-new-password"]', 'short');
     await page.type('[data-testid="account-confirm-password"]', 'short');
@@ -572,7 +573,7 @@ async function main() {
     await page.waitForSelector('[data-testid="change-password-card"]');
     await capture(page, 'new-user-forced-rotation');
 
-    const NEWBIE_PASSWORD = 'newbie-picked-this-1';
+    NEWBIE_PASSWORD = 'newbie-picked-this-1';
     await page.type('[data-testid="current-password"]', newUser.password);
     await page.type('[data-testid="new-password"]', NEWBIE_PASSWORD);
     await page.type('[data-testid="confirm-password"]', NEWBIE_PASSWORD);
@@ -646,6 +647,66 @@ async function main() {
       );
     }
     log('behaviour       disabled account can no longer log in (401)');
+
+    // ---- The admin can see and revoke anyone's session --------------------------
+    //
+    // `newbie` signed in earlier, so there is a real session belonging to someone else.
+    const newbieSession = await (
+      await api(`${base}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'newbie', password: NEWBIE_PASSWORD }),
+      })
+    ).json();
+    const newbieToken = newbieSession.access_token;
+
+    const worksBefore = await api(`${base}/api/component_list`, {
+      headers: { Authorization: `Bearer ${newbieToken}` },
+    });
+    if (worksBefore.status !== 200) {
+      throw new Error(`newbie's session should work, got ${worksBefore.status}`);
+    }
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('[data-testid="token-table"]');
+    await capture(page, 'admin-sessions');
+
+    // Find that session in the admin list and revoke it.
+    const allTokens = await (
+      await api(`${base}/api/auth/admin/tokens`, {
+        headers: { Authorization: `Bearer ${apiToken2}` },
+      })
+    ).json();
+    // Target the exact session being tested. `newbie` has more than one, so matching by
+    // username alone would revoke an older row and the assertion would pass vacuously.
+    // The id is embedded in the token: mdb_at_<id>.<secret>.
+    const newbieTokenId = Number(newbieToken.split('.')[0].split('_').pop());
+    const newbieRow = allTokens.find((t) => t.id === newbieTokenId);
+    if (!newbieRow) {
+      throw new Error(
+        `expected session ${newbieTokenId} in the admin list, got ${JSON.stringify(allTokens)}`
+      );
+    }
+    if (newbieRow.username !== 'newbie' || newbieRow.kind !== 'Access') {
+      throw new Error(`token ${newbieTokenId} is not newbie's session: ${JSON.stringify(newbieRow)}`);
+    }
+
+    await page.click(`[data-testid="revoke-token-${newbieRow.id}"]`);
+    await page.waitForFunction(
+      (id) => !document.querySelector(`[data-testid="token-row-${id}"]`),
+      {},
+      newbieRow.id
+    );
+
+    const worksAfter = await api(`${base}/api/component_list`, {
+      headers: { Authorization: `Bearer ${newbieToken}` },
+    });
+    if (worksAfter.status !== 401) {
+      throw new Error(
+        `a revoked session must stop working, got ${worksAfter.status}`
+      );
+    }
+    log("behaviour       admin revoked another user's session; it returns 401");
 
     // ---- Steps 14-17: grant the bot access to a component it could not see ------
     //

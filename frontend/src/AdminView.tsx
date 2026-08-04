@@ -24,7 +24,20 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { authApi, getActiveSession, type AdminUser } from './api/auth_api';
+import {
+  authApi,
+  getActiveSession,
+  type AdminToken,
+  type AdminUser,
+} from './api/auth_api';
+
+/// The wire values are the Rust enum names; these are what an operator would call them.
+const KIND_LABELS: Record<string, string> = {
+  Access: 'Session',
+  Refresh: 'Refresh',
+  Api: 'API token',
+  Bot: 'Bot',
+};
 
 interface AdminViewProps {
   username: string;
@@ -37,6 +50,7 @@ interface AdminViewProps {
 /// the route another way achieves nothing.
 const AdminView: React.FC<AdminViewProps> = ({ username }) => {
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [tokens, setTokens] = useState<AdminToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,9 +73,29 @@ const AdminView: React.FC<AdminViewProps> = ({ username }) => {
     }
   }, []);
 
+  const loadTokens = useCallback(async () => {
+    const session = getActiveSession();
+    if (!session) return;
+    const result = await authApi.listAllTokens(session.accessToken);
+    if (result.ok) setTokens(result.val);
+  }, []);
+
   useEffect(() => {
-    loadUsers().finally(() => setLoading(false));
-  }, [loadUsers]);
+    Promise.all([loadUsers(), loadTokens()]).finally(() => setLoading(false));
+  }, [loadUsers, loadTokens]);
+
+  const handleRevokeToken = async (id: number) => {
+    const session = getActiveSession();
+    if (!session) return;
+
+    setError(null);
+    const result = await authApi.adminRevokeToken(session.accessToken, id);
+    if (result.err) {
+      setError(result.val.message);
+      return;
+    }
+    await loadTokens();
+  };
 
   const handleCreate = async () => {
     const session = getActiveSession();
@@ -96,7 +130,8 @@ const AdminView: React.FC<AdminViewProps> = ({ username }) => {
       setError(result.val.message);
       return;
     }
-    await loadUsers();
+    // Disabling also revokes the account's tokens, so the session list changes too.
+    await Promise.all([loadUsers(), loadTokens()]);
   };
 
   if (loading) {
@@ -216,6 +251,67 @@ const AdminView: React.FC<AdminViewProps> = ({ username }) => {
                 ))}
               </TableBody>
             </Table>
+          </CardContent>
+        </Card>
+        <Card variant="outlined">
+          <CardHeader
+            title="Sessions and tokens"
+            slotProps={{ title: { variant: 'h6', sx: { fontWeight: 'bold' } } }}
+          />
+          <Divider />
+          <CardContent>
+            <Typography color="text.secondary" variant="body2" sx={{ mb: 2 }}>
+              Every credential in the system. <strong>Session</strong> rows are people
+              currently signed in; revoking one signs them out immediately.
+            </Typography>
+
+            {tokens.length === 0 ? (
+              <Typography color="text.secondary" data-testid="no-tokens">
+                No active sessions or tokens.
+              </Typography>
+            ) : (
+              <Table size="small" data-testid="token-table">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>User</TableCell>
+                    <TableCell>Kind</TableCell>
+                    <TableCell>Name</TableCell>
+                    <TableCell align="right">Action</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {tokens.map((t) => (
+                    <TableRow key={t.id} data-testid={`token-row-${t.id}`}>
+                      <TableCell>{t.username}</TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          label={KIND_LABELS[t.kind] ?? t.kind}
+                          color={t.kind === 'Bot' ? 'secondary' : 'default'}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        {t.identity ?? t.label ?? (
+                          <Typography variant="caption" color="text.secondary">
+                            —
+                          </Typography>
+                        )}
+                      </TableCell>
+                      <TableCell align="right">
+                        <Button
+                          size="small"
+                          color="error"
+                          onClick={() => handleRevokeToken(t.id)}
+                          data-testid={`revoke-token-${t.id}`}
+                        >
+                          Revoke
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
       </Stack>

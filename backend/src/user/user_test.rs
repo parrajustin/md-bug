@@ -489,3 +489,58 @@ async fn a_disabled_account_can_be_re_enabled() {
     // The password still works; disabling is not a password reset.
     assert!(mgr.verify_password("alice", "pw").await.is_ok());
 }
+
+#[tokio::test]
+async fn lists_every_token_across_all_users() {
+    let (mgr, _dir) = manager().await;
+    let alice = mgr.create_user("alice", None, Some("pw"), false, false).await.expect("a");
+    let bob = mgr.create_user("bob", None, Some("pw"), false, false).await.expect("b");
+
+    mgr.issue_token("alice", alice, TokenKind::Access, None, None, Some(3600))
+        .await
+        .expect("session");
+    mgr.issue_token("alice", alice, TokenKind::Api, Some("cat_fox_owl".into()), None, None)
+        .await
+        .expect("api");
+    mgr.issue_token(
+        "bob",
+        bob,
+        TokenKind::Bot,
+        Some("bob--cat_fox_owl".into()),
+        Some("bob--cat_fox_owl".into()),
+        None,
+    )
+    .await
+    .expect("bot");
+
+    let all = mgr.list_all_tokens().await.expect("list");
+    assert_eq!(all.len(), 3, "the admin view spans every account, not just one");
+
+    // Secrets are only ever stored hashed, so surfacing this list reveals no credential.
+    for token in &all {
+        assert_eq!(token.secret_hash.len(), 64, "expected a SHA-256 hex digest");
+    }
+
+    let owners: Vec<&str> = all.iter().map(|t| t.username.as_str()).collect();
+    assert!(owners.contains(&"alice"));
+    assert!(owners.contains(&"bob"));
+}
+
+#[tokio::test]
+async fn an_admin_can_revoke_someone_elses_session() {
+    let (mgr, _dir) = manager().await;
+    let bob = mgr.create_user("bob", None, Some("pw"), false, false).await.expect("b");
+
+    let session = mgr
+        .issue_token("bob", bob, TokenKind::Access, None, None, Some(3600))
+        .await
+        .expect("issue");
+    assert!(mgr.verify_token(&session.plaintext, TokenKind::Access).await.is_some());
+
+    // Cutting off a compromised session belonging to someone else is the point of the
+    // admin console, so this path deliberately ignores ownership.
+    let id = mgr.list_all_tokens().await.expect("list")[0].id;
+    mgr.revoke_token(id).await.expect("revoke");
+
+    assert!(mgr.verify_token(&session.plaintext, TokenKind::Access).await.is_none());
+}

@@ -600,3 +600,83 @@ pub async fn set_user_disabled(
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+#[derive(Serialize)]
+pub struct AdminTokenSummary {
+    pub id: u64,
+    /// The account the token belongs to.
+    pub username: String,
+    /// "Access", "Refresh", "Api" or "Bot".
+    pub kind: String,
+    pub label: Option<String>,
+    /// The ACL name, for bots only.
+    pub identity: Option<String>,
+    pub created_at: u64,
+    pub expires_at: Option<u64>,
+}
+
+/// `GET /api/auth/admin/tokens` — every token in the system. **Admin only.**
+///
+/// Access tokens here are live sessions, so this doubles as "who is signed in". Only
+/// hashes are stored, so nothing secret is exposed — but it reveals who is logged in,
+/// which is why it is gated.
+pub async fn list_all_tokens(
+    State(state): State<Arc<AppState>>,
+    user: RequestUser,
+) -> Result<impl IntoResponse, StatusCode> {
+    if !user.is_admin {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let tokens = state
+        .users
+        .list_all_tokens()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let summaries: Vec<AdminTokenSummary> = tokens
+        .into_iter()
+        .map(|t| AdminTokenSummary {
+            id: t.id,
+            username: t.username,
+            kind: format!("{:?}", t.kind),
+            label: t.label,
+            identity: t.identity,
+            created_at: t.created_at,
+            expires_at: t.expires_at,
+        })
+        .collect();
+
+    Ok(Json(summaries))
+}
+
+/// `DELETE /api/auth/admin/tokens/:id` — revoke anyone's token. **Admin only.**
+///
+/// Unlike the per-user revoke endpoints this deliberately does not check ownership:
+/// cutting off a compromised session belonging to someone else is the whole point.
+pub async fn admin_revoke_token(
+    State(state): State<Arc<AppState>>,
+    user: RequestUser,
+    Path(id): Path<u64>,
+) -> Result<impl IntoResponse, StatusCode> {
+    if !user.is_admin {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let tokens = state
+        .users
+        .list_all_tokens()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if !tokens.iter().any(|t| t.id == id) {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    state
+        .users
+        .revoke_token(id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::NO_CONTENT)
+}

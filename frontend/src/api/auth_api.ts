@@ -35,6 +35,17 @@ export interface AdminUser {
   disabled: boolean;
 }
 
+export interface AdminToken {
+  id: number;
+  username: string;
+  /// "Access", "Refresh", "Api" or "Bot".
+  kind: string;
+  label: string | null;
+  identity: string | null;
+  created_at: number;
+  expires_at: number | null;
+}
+
 export interface PersonalToken {
   id: number;
   label: string | null;
@@ -224,6 +235,43 @@ export class AuthApi {
 
     const resp = response.safeUnwrap();
     if (!resp.ok) return Err(errorForStatus(resp.status, 'Could not update the account'));
+    return Ok(undefined);
+  }
+
+  /// Admin-only. Every token in the system; `Access` entries are live sessions.
+  async listAllTokens(accessToken: string): Promise<Result<AdminToken[], StatusError>> {
+    const response = await WrapPromise(
+      fetch(`${this.baseUrl}/api/auth/admin/tokens`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }),
+      'Could not list tokens'
+    );
+    if (response.err) return response;
+
+    const resp = response.safeUnwrap();
+    if (!resp.ok) return Err(errorForStatus(resp.status, 'Could not list tokens'));
+
+    const parsed = await WrapPromise(resp.json(), 'Malformed token list');
+    if (parsed.err) return parsed;
+    return Ok(parsed.safeUnwrap() as AdminToken[]);
+  }
+
+  /// Admin-only. Revokes anyone's token, not just the caller's.
+  async adminRevokeToken(
+    accessToken: string,
+    id: number
+  ): Promise<Result<void, StatusError>> {
+    const response = await WrapPromise(
+      fetch(`${this.baseUrl}/api/auth/admin/tokens/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }),
+      'Could not revoke the token'
+    );
+    if (response.err) return response;
+
+    const resp = response.safeUnwrap();
+    if (!resp.ok) return Err(errorForStatus(resp.status, 'Could not revoke the token'));
     return Ok(undefined);
   }
 

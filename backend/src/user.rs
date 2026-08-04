@@ -393,6 +393,14 @@ impl UserManager {
             .collect())
     }
 
+    /// Every token in the system, for the admin console. Secrets are hashes, so this is
+    /// safe to surface — but it is admin-only because it reveals who is signed in.
+    pub async fn list_all_tokens(&self) -> anyhow::Result<Vec<StoredToken>> {
+        let db = self.db.read().await;
+        let tree = db.data().await.get("data")?;
+        Ok(tree.into::<UserDb>()?.tokens)
+    }
+
     /// Drops tokens that are already past their expiry.
     pub async fn prune_expired_tokens(&self) -> anyhow::Result<usize> {
         let mut db = self.db.write().await;
