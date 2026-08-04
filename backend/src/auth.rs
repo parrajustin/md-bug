@@ -59,6 +59,63 @@ impl TokenKind {
     }
 }
 
+/// Separator between a bot's owner and its generated suffix, e.g.
+/// `admin--long_cat_fat`.
+///
+/// Usernames reject both `--` and `:`, so the two namespaces cannot overlap. Without a
+/// reserved marker a token named `admin` would match every ACL entry granting `admin`,
+/// which is a privilege escalation rather than a naming collision.
+pub const BOT_IDENTITY_SEPARATOR: &str = "--";
+
+/// Words used to build the generated suffix. Deliberately short and unambiguous so the
+/// resulting identity is easy to read aloud and to paste into an ACL.
+const BOT_WORDS: &[&str] = &[
+    "long", "cat", "fat", "blue", "swift", "quiet", "brave", "tiny", "odd", "warm",
+    "sharp", "loud", "calm", "bold", "dark", "fair", "keen", "lucky", "merry", "neat",
+    "proud", "rapid", "sly", "tall", "vast", "wild", "young", "zesty", "amber", "brisk",
+    "clever", "dizzy", "eager", "fuzzy", "glad", "happy", "icy", "jolly", "kind", "lively",
+    "fox", "owl", "bear", "wolf", "hawk", "mole", "newt", "crow", "lynx", "toad",
+    "otter", "raven", "shark", "tiger", "viper", "whale", "yak", "zebra", "finch", "gecko",
+];
+
+/// Environment variable that pins the generated suffix, for tests.
+///
+/// Set `MD_BUG_BOT_SUFFIX=fixed_test_bot` and every token becomes
+/// `<owner>--fixed_test_bot`, so screenshots and assertions are reproducible without
+/// scrubbing the name out afterwards. Only the *name* is fixable — the token secret is
+/// always CSPRNG, because a predictable secret would be a real vulnerability if this were
+/// ever set outside a test.
+pub const BOT_SUFFIX_ENV: &str = "MD_BUG_BOT_SUFFIX";
+
+/// Builds a bot identity of the form `<owner>--<word>_<word>_<word>`.
+///
+/// Names are generated rather than user-supplied: a human-chosen label is the thing most
+/// likely to collide with, or be mistaken for, a real account.
+pub fn generate_bot_identity(owner_username: &str) -> String {
+    if let Ok(fixed) = std::env::var(BOT_SUFFIX_ENV) {
+        if !fixed.is_empty() {
+            return format!("{owner_username}{BOT_IDENTITY_SEPARATOR}{fixed}");
+        }
+    }
+    let mut bytes = [0u8; 3];
+    OsRng.fill_bytes(&mut bytes);
+    let words: Vec<&str> = bytes
+        .iter()
+        .map(|b| BOT_WORDS[*b as usize % BOT_WORDS.len()])
+        .collect();
+    format!(
+        "{owner_username}{BOT_IDENTITY_SEPARATOR}{}_{}_{}",
+        words[0], words[1], words[2]
+    )
+}
+
+/// True when a name belongs to the bot namespace rather than a real account.
+///
+/// Relies on usernames forbidding `--`; see `create_user`'s validation.
+pub fn is_bot_identity(identity: &str) -> bool {
+    identity.contains(BOT_IDENTITY_SEPARATOR)
+}
+
 /// A stored token. The plaintext secret exists only in the response that created it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredToken {
@@ -70,6 +127,14 @@ pub struct StoredToken {
     pub uid: u64,
     /// Human-readable label, for personal access tokens shown in a management UI.
     pub label: Option<String>,
+    /// The ACL name this token acts as, e.g. `bot:ci-agent`.
+    ///
+    /// Personal access tokens are separate identities: they can be added to component
+    /// groups and bug access lists exactly like a user, and are capped at their owner's
+    /// permissions. `None` means "act as the owner" — that is how access and refresh
+    /// tokens work, and how personal tokens issued before identities existed behave.
+    #[serde(default)]
+    pub identity: Option<String>,
     pub secret_hash: String,
     /// Epoch seconds. `None` means the token does not expire on its own.
     pub expires_at: Option<u64>,
@@ -88,11 +153,27 @@ impl StoredToken {
 /// The authenticated caller, produced by the extractor and passed to every handler.
 #[derive(Debug, Clone)]
 pub struct RequestUser {
+    /// The name permission checks are made against. For a bot this is its `bot:` identity,
+    /// not the owner's username.
     pub username: String,
+    /// The human account behind the request. Equal to `username` for a real user; for a
+    /// bot, the account that created the token.
+    ///
+    /// Every permission decision is capped by what this account can do, so a bot can be
+    /// granted less than its owner but never more — and loses access automatically if the
+    /// owner is demoted.
+    pub owner_username: String,
     pub uid: u64,
     pub is_admin: bool,
     /// True when authenticating with a personal access token rather than a session.
     pub via_personal_token: bool,
+}
+
+impl RequestUser {
+    /// True when this request is a bot acting under a personal access token.
+    pub fn is_bot(&self) -> bool {
+        self.via_personal_token && self.username != self.owner_username
+    }
 }
 
 /// A freshly minted token: the plaintext to hand back, and the record to persist.
@@ -135,12 +216,14 @@ fn secrets_match(a: &str, b: &str) -> bool {
     diff == 0
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_token(
     id: u64,
     kind: TokenKind,
     username: &str,
     uid: u64,
     label: Option<String>,
+    identity: Option<String>,
     ttl_secs: Option<u64>,
 ) -> NewToken {
     let secret = generate_secret();
@@ -153,6 +236,7 @@ pub fn build_token(
             username: username.to_string(),
             uid,
             label,
+            identity,
             secret_hash: hash_secret(&secret),
             expires_at: ttl_secs.map(|ttl| now + ttl),
             created_at: now,

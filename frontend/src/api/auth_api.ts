@@ -30,6 +30,9 @@ interface LoginResponseBody {
 export interface PersonalToken {
   id: number;
   label: string | null;
+  /// The ACL name, e.g. `bot:ci-agent`. Null for tokens issued before identities
+  /// existed, which act as their owner instead.
+  identity: string | null;
   created_at: number;
 }
 
@@ -192,12 +195,15 @@ export class AuthApi {
     return Ok(parsed.safeUnwrap() as PersonalToken[]);
   }
 
-  /// Returns the plaintext token. This is the only time the server will ever reveal it.
+  /// Creates a bot token. The name is generated server-side as
+  /// `<username>--<word>_<word>_<word>`, so there is nothing to pass.
+  ///
+  /// Returns the identity and the plaintext token. This is the only time the server will
+  /// ever reveal the secret.
   async createPersonalToken(
-    accessToken: string,
-    label: string
-  ): Promise<Result<string, StatusError>> {
-    const response = await this.postJson('/api/auth/tokens', { label }, accessToken);
+    accessToken: string
+  ): Promise<Result<{ identity: string; token: string }, StatusError>> {
+    const response = await this.postJson('/api/auth/tokens', {}, accessToken);
     if (response.err) return response;
 
     const resp = response.safeUnwrap();
@@ -205,8 +211,8 @@ export class AuthApi {
 
     const parsed = await WrapPromise(resp.json(), 'Malformed token response');
     if (parsed.err) return parsed;
-    const body = parsed.safeUnwrap() as { token: string };
-    return Ok(body.token);
+    const body = parsed.safeUnwrap() as { identity: string; token: string };
+    return Ok({ identity: body.identity, token: body.token });
   }
 
   async revokePersonalToken(

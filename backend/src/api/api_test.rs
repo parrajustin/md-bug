@@ -881,3 +881,254 @@ async fn the_default_component_is_visible_to_the_component_cache() -> anyhow::Re
     );
     Ok(())
 }
+
+
+/// A minimal bug with no access grants, for exercising `bug_access` directly.
+fn bare_bug_metadata() -> BugMetadata {
+    BugMetadata {
+        version: CURRENT_VERSION,
+        id: 1,
+        reporter: String::new(),
+        bug_type: "Bug".to_string(),
+        priority: "P2".to_string(),
+        severity: "S2".to_string(),
+        status: "New".to_string(),
+        assignee: String::new(),
+        verifier: String::new(),
+        collaborators: vec![],
+        cc: vec![],
+        access: AccessMetadata {
+            version: CURRENT_VERSION,
+            full_access: vec![],
+            comment_access: vec![],
+            view_access: vec![],
+        },
+        title: "t".to_string(),
+        component_id: 1,
+        description: String::new(),
+        user_metadata: vec![],
+        created_at: 0,
+        state_id: 1,
+    }
+}
+
+/// Builds component metadata granting `permission` to each listed member.
+fn meta_granting(members: &[(&str, Vec<Permission>)]) -> ComponentMetadata {
+    let mut groups = HashMap::new();
+    for (i, (member, perms)) in members.iter().enumerate() {
+        groups.insert(
+            format!("group_{i}"),
+            GroupPermissions {
+                permissions: perms.clone(),
+                view_level: 1,
+                members: vec![member.to_string()],
+            },
+        );
+    }
+    let mut meta = ComponentMetadata::empty();
+    meta.access_control = AccessControl { groups };
+    meta
+}
+
+#[tokio::test]
+async fn a_bot_is_capped_at_its_owners_permissions() {
+    // The bot is granted ComponentAdmin outright, but its owner only has ViewIssues.
+    let meta = meta_granting(&[
+        ("alice--long_cat_fat", vec![Permission::ComponentAdmin]),
+        ("alice", vec![Permission::ViewIssues]),
+    ]);
+
+    let bot = RequestUser::local_bot("alice--long_cat_fat", "alice", 1);
+
+    assert!(
+        !bot.can(&meta, &Permission::ComponentAdmin),
+        "a bot must not exceed its owner, however it was granted"
+    );
+    assert!(
+        bot.can(&meta, &Permission::ViewIssues),
+        "a permission both hold should still work"
+    );
+}
+
+#[tokio::test]
+async fn a_bot_can_hold_less_than_its_owner() {
+    // Owner is a full admin; the bot is only a contributor.
+    let meta = meta_granting(&[
+        ("alice", vec![Permission::ComponentAdmin]),
+        ("alice--long_cat_fat", vec![Permission::ViewIssues]),
+    ]);
+
+    let bot = RequestUser::local_bot("alice--long_cat_fat", "alice", 1);
+
+    assert!(bot.can(&meta, &Permission::ViewIssues));
+    assert!(
+        !bot.can(&meta, &Permission::ComponentAdmin),
+        "the bot was never granted admin, so inheriting it from the owner would be wrong"
+    );
+}
+
+#[tokio::test]
+async fn a_bot_with_no_grant_of_its_own_gets_nothing() {
+    // Only the owner is listed. The bot is a separate identity, so it holds nothing —
+    // being owned by a privileged user is not itself a grant.
+    let meta = meta_granting(&[("alice", vec![Permission::ComponentAdmin])]);
+    let bot = RequestUser::local_bot("alice--long_cat_fat", "alice", 1);
+
+    assert!(!bot.can(&meta, &Permission::ComponentAdmin));
+    assert!(!bot.can(&meta, &Permission::ViewIssues));
+}
+
+#[tokio::test]
+async fn demoting_the_owner_revokes_the_bot() {
+    let granted = meta_granting(&[
+        ("alice--long_cat_fat", vec![Permission::ComponentAdmin]),
+        ("alice", vec![Permission::ComponentAdmin]),
+    ]);
+    let bot = RequestUser::local_bot("alice--long_cat_fat", "alice", 1);
+    assert!(bot.can(&granted, &Permission::ComponentAdmin));
+
+    // Same bot grant, but the owner has been removed from the component entirely.
+    let demoted = meta_granting(&[("alice--long_cat_fat", vec![Permission::ComponentAdmin])]);
+    assert!(
+        !bot.can(&demoted, &Permission::ComponentAdmin),
+        "losing the owner's access must take the bot's with it"
+    );
+}
+
+#[tokio::test]
+async fn a_real_user_is_not_capped_against_itself() {
+    let meta = meta_granting(&[("alice", vec![Permission::ComponentAdmin])]);
+    let alice = RequestUser::local("alice", 1, false);
+
+    assert!(!alice.is_bot());
+    assert!(alice.can(&meta, &Permission::ComponentAdmin));
+}
+
+#[tokio::test]
+async fn bug_access_is_capped_at_the_owners_level() -> anyhow::Result<()> {
+    let resolved = ComponentMetadata::empty();
+
+    let mut bug = bare_bug_metadata();
+    // Bot has full access to the bug; owner only comment.
+    bug.access.full_access = vec!["alice--long_cat_fat".to_string()];
+    bug.access.comment_access = vec!["alice".to_string()];
+
+    let bot = RequestUser::local_bot("alice--long_cat_fat", "alice", 1);
+    assert_eq!(
+        bot.bug_access(&bug, &resolved),
+        UserAccessLevel::Comment,
+        "the bot is clamped down to the owner's level"
+    );
+
+    // And the reverse: owner full, bot only comment.
+    let mut bug = bare_bug_metadata();
+    bug.access.full_access = vec!["alice".to_string()];
+    bug.access.comment_access = vec!["alice--long_cat_fat".to_string()];
+    assert_eq!(bot.bug_access(&bug, &resolved), UserAccessLevel::Comment);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_bot_is_never_an_admin() {
+    // Root creation is gated on `is_admin`, which bots never have — so a leaked bot key
+    // cannot create root components or accounts even if its owner could.
+    let bot = RequestUser::local_bot("admin--long_cat_fat", "admin", 1);
+    assert!(!bot.is_admin);
+    assert!(bot.is_bot());
+}
+
+#[tokio::test]
+async fn bot_creating_a_root_component_is_forbidden() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let state = empty_state(dir.path()).await;
+
+    let res = create_root_component(
+        State(state),
+        RequestUser::local_bot("admin--long_cat_fat", "admin", 1),
+        Json(CreateRootComponentRequest {
+            name: "BotRoot".to_string(),
+            description: String::new(),
+        }),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    Ok(())
+}
+
+#[tokio::test]
+async fn public_grants_do_not_reach_bots() {
+    // A component that lets everyone contribute.
+    let meta = meta_granting(&[("PUBLIC", vec![Permission::ViewIssues])]);
+
+    let human = RequestUser::local("anyone", 1, false);
+    let bot = RequestUser::local_bot("alice--long_cat_fat", "alice", 1);
+
+    assert!(
+        human.can(&meta, &Permission::ViewIssues),
+        "PUBLIC still means every person"
+    );
+    assert!(
+        !bot.can(&meta, &Permission::ViewIssues),
+        "a bot must be added explicitly; PUBLIC is not a grant to automation"
+    );
+}
+
+#[tokio::test]
+async fn a_bot_added_explicitly_alongside_public_works() {
+    // The owner's access comes from PUBLIC, the bot's from being named directly.
+    let meta = meta_granting(&[
+        ("PUBLIC", vec![Permission::ViewIssues]),
+        ("alice--long_cat_fat", vec![Permission::ViewIssues]),
+    ]);
+
+    let bot = RequestUser::local_bot("alice--long_cat_fat", "alice", 1);
+    assert!(
+        bot.can(&meta, &Permission::ViewIssues),
+        "an explicit grant works even though the owner's own access is via PUBLIC"
+    );
+}
+
+#[tokio::test]
+async fn public_bug_access_does_not_reach_bots() {
+    let resolved = ComponentMetadata::empty();
+    let mut bug = bare_bug_metadata();
+    bug.access.view_access = vec!["PUBLIC".to_string()];
+
+    let human = RequestUser::local("anyone", 1, false);
+    let bot = RequestUser::local_bot("alice--long_cat_fat", "alice", 1);
+
+    assert_eq!(human.bug_access(&bug, &resolved), UserAccessLevel::View);
+    assert_eq!(
+        bot.bug_access(&bug, &resolved),
+        UserAccessLevel::None,
+        "a PUBLIC bug must not be readable by automation that was never added"
+    );
+}
+
+#[tokio::test]
+async fn generated_bot_identities_are_namespaced_and_varied() {
+    use crate::auth::{generate_bot_identity, is_bot_identity};
+
+    let a = generate_bot_identity("admin");
+    assert!(a.starts_with("admin--"), "identity should carry its owner: {a}");
+    assert!(is_bot_identity(&a));
+    assert_eq!(
+        a.split("--").nth(1).expect("suffix").split('_').count(),
+        3,
+        "suffix should be three underscore-separated words: {a}"
+    );
+
+    // A real username must never be mistaken for a bot.
+    assert!(!is_bot_identity("admin"));
+    assert!(!is_bot_identity("alice"));
+
+    // Generation should vary; identical draws across many tries would mean no entropy.
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..25 {
+        seen.insert(generate_bot_identity("admin"));
+    }
+    assert!(seen.len() > 1, "generated identities should not be constant");
+}

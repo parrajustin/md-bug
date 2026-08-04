@@ -87,8 +87,8 @@ export const testBugSummary: BugSummary = {
 };
 
 export const testComponents: ComponentSummary[] = [
-  { id: 1, name: 'root', description: 'Root component', folders: [], parent_id: 0 },
-  { id: 2, name: 'frontend', description: 'UI code', folders: ['root'], parent_id: 1 },
+  { id: 1, name: 'root', description: 'Root component', folders: [], parent_id: 0, creator: TEST_USER },
+  { id: 2, name: 'frontend', description: 'UI code', folders: ['root'], parent_id: 1, creator: TEST_USER },
 ];
 
 export const testComponentMetadata: ComponentMetadata = {

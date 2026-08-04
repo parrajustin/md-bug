@@ -138,6 +138,10 @@ export interface ComponentSummary {
   description: string;
   folders: string[];
   parent_id: number;
+  /// Who created it. Ownership is `creator` rather than "is a Component Admin" because
+  /// admin rights inherit down the tree and PUBLIC matches everyone, so an admin check
+  /// would report whole subtrees instead of what you made.
+  creator: string;
 }
 
 export interface CreateBugRequest {

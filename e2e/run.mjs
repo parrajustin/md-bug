@@ -34,8 +34,17 @@ const VIEWPORT = { width: 1280, height: 800 };
 const MAX_DIFF_PIXELS = 40;
 
 const NEW_ADMIN_PASSWORD = 'chosen-by-the-operator-1';
+/// Pins the generated bot identity so goldens do not need the name scrubbed out.
+const FIXED_BOT_SUFFIX = 'fixed_test_bot';
+const EXPECTED_BOT_IDENTITY = `admin--${FIXED_BOT_SUFFIX}`;
 
 const log = (msg) => console.log(`  ${msg}`);
+
+/// `fetch` with a deadline. Node's built-in fetch has no default timeout, so a request
+/// that never answers hangs the whole run silently.
+async function api(url, init = {}) {
+  return fetch(url, { ...init, signal: AbortSignal.timeout(10_000) });
+}
 
 async function freePort() {
   return new Promise((resolve, reject) => {
@@ -69,7 +78,13 @@ async function startBackend(dataDir, port) {
       '-f',
       join(REPO, 'frontend', 'public'),
     ],
-    { cwd: join(REPO, 'backend'), stdio: ['ignore', 'pipe', 'pipe'] }
+    {
+      cwd: join(REPO, 'backend'),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // Pin the generated bot name so captures are reproducible without scrubbing it
+      // out afterwards. Only the name is fixable; the secret stays CSPRNG.
+      env: { ...process.env, MD_BUG_BOT_SUFFIX: FIXED_BOT_SUFFIX },
+    }
   );
 
   let stdout = '';
@@ -105,29 +120,12 @@ async function startBackend(dataDir, port) {
 async function freezeAnimations(page) {
   await page.addStyleTag({
     content: `*, *::before, *::after {
-      animation-duration: 0s !important;
+      animation-duration: 1ms !important;
       animation-delay: 0s !important;
-      transition-duration: 0s !important;
+      transition-duration: 1ms !important;
       transition-delay: 0s !important;
       caret-color: transparent !important;
     }`,
-  });
-}
-
-/// Reads the access token the page is holding, so assertions can call the API as the
-/// same user the browser is signed in as.
-async function readAccessToken(page) {
-  return page.evaluate(async () => {
-    return new Promise((resolve) => {
-      const open = indexedDB.open('md-bug-db', 1);
-      open.onsuccess = () => {
-        const db = open.result;
-        const req = db.transaction('settings', 'readonly').objectStore('settings').get('session');
-        req.onsuccess = () => resolve(req.result?.accessToken ?? '');
-        req.onerror = () => resolve('');
-      };
-      open.onerror = () => resolve('');
-    });
   });
 }
 
@@ -147,6 +145,15 @@ async function capture(page, name) {
   const goldenPath = join(GOLDEN_DIR, fileName);
 
   await freezeAnimations(page);
+  // Clicking tabs and fields scrolls the page, and where it lands varies run to run.
+  // Normalise before capturing or the golden can never match.
+  // The app scrolls an inner container, not the window, so reset both.
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    document.querySelectorAll('*').forEach((el) => {
+      if (el.scrollTop) el.scrollTop = 0;
+    });
+  });
   await new Promise((r) => setTimeout(r, 150));
   await page.screenshot({ path: actualPath });
 
@@ -219,11 +226,23 @@ async function main() {
     });
     const page = await browser.newPage();
     await page.setViewport(VIEWPORT);
+    // Without this every wait defaults to 30s, so a handful of misses turn a 40-second
+    // run into several minutes of apparent hang.
+    page.setDefaultTimeout(15_000);
+    page.setDefaultNavigationTimeout(15_000);
+
+    // Several views report success/failure with a native alert(). Puppeteer never
+    // dismisses dialogs on its own, so an un-handled one blocks the page forever — which
+    // looks exactly like a hang with no error. Accept them and record what they said.
+    page.on('dialog', async (dialog) => {
+      log(`  .. dialog: ${dialog.message()}`);
+      await dialog.accept();
+    });
 
     const base = `http://localhost:${port}`;
 
     // ---- Step 1: the login screen ----------------------------------------------
-    await page.goto(base, { waitUntil: 'networkidle0' });
+    await page.goto(base, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('[data-testid="login-card"]');
     await capture(page, 'login-screen');
 
@@ -264,17 +283,29 @@ async function main() {
     await page.type('[data-testid="login-username"]', 'admin');
     await page.type('[data-testid="login-password"]', NEW_ADMIN_PASSWORD);
     await page.click('[data-testid="login-submit"]');
-    await page.waitForSelector('header', { timeout: 15_000 });
-    await page.waitForNetworkIdle({ idleTime: 500 }).catch(() => {});
+    await page.waitForSelector('header');
+    await page.waitForSelector('::-p-text(Components)');
     await capture(page, 'signed-in-home');
 
+    // A token for the runner's own API assertions. Scraping it from the page mid-flight
+    // races the app's client-side navigations and detaches the frame.
+    const apiToken = await (
+      await api(`${base}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'admin', password: NEW_ADMIN_PASSWORD }),
+      })
+    )
+      .json()
+      .then((b) => b.access_token);
+
     // ---- Step 7: the session survives a reload ---------------------------------
-    await page.reload({ waitUntil: 'networkidle0' });
+    await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForSelector('header', { timeout: 15_000 });
     await capture(page, 'session-persists-after-reload');
 
     // ---- Step 8: an admin sees the root-component toggle ------------------------
-    await page.goto(`${base}/create_component`, { waitUntil: 'networkidle0' });
+    await page.goto(`${base}/create_component`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('[data-testid="root-toggle"]');
     await capture(page, 'create-component-admin');
 
@@ -286,13 +317,13 @@ async function main() {
     // ---- Step 10: creating a root component actually works ---------------------
     await page.type('[data-testid="component-name"]', 'e2e_root');
     await page.click('button::-p-text(Create Component)');
-    await page.waitForNetworkIdle({ idleTime: 500 }).catch(() => {});
+    
     await page.waitForSelector('header', { timeout: 15_000 });
     await capture(page, 'after-creating-root');
 
     // Confirm it landed server-side rather than trusting the screenshot.
-    const listResp = await fetch(`${base}/api/component_list`, {
-      headers: { Authorization: `Bearer ${await readAccessToken(page)}` },
+    const listResp = await api(`${base}/api/component_list`, {
+      headers: { Authorization: `Bearer ${apiToken}` },
     });
     const components = await listResp.json();
     if (!Array.isArray(components) || !components.some((c) => c.name === 'e2e_root')) {
@@ -302,9 +333,166 @@ async function main() {
     }
     log('behaviour       root component created via the API and listed');
 
+    // ---- Step 11: the user menu offers an Account entry ------------------------
+    await page.goto(`${base}/`, { waitUntil: 'domcontentloaded' });
+    await page.click('[data-testid="user-menu"]');
+    await page.waitForSelector('[data-testid="menu-account"]');
+    await capture(page, 'user-menu-open');
+
+    // ---- Step 12: the account page ---------------------------------------------
+    await page.click('[data-testid="menu-account"]');
+    await page.waitForSelector('[data-testid="account-view"]');
+    if (!page.url().endsWith('/account')) {
+      throw new Error(`Account menu item should navigate to /account, got ${page.url()}`);
+    }
+    // Reload so the capture is not covered by the closing menu's backdrop, and so the
+    // page is in the state a user reaching /account directly would see.
+    await page.goto(`${base}/account`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('[data-testid="account-view"]');
+    await capture(page, 'account-view');
+
+    // ---- Step 13: creating a bot token reveals it once --------------------------
+    await page.click('[data-testid="create-token"]');
+    await page.waitForSelector('[data-testid="revealed-token"]');
+    const botToken = await page.$eval('[data-testid="revealed-token"]', (el) => el.value);
+    const botIdentity = await page.$eval(
+      '[data-testid="revealed-identity"]',
+      (el) => el.value
+    );
+    if (botIdentity !== EXPECTED_BOT_IDENTITY) {
+      throw new Error(
+        `expected the pinned identity ${EXPECTED_BOT_IDENTITY}, got ${botIdentity}`
+      );
+    }
+    log(`behaviour       token identity: ${botIdentity} (pinned via MD_BUG_BOT_SUFFIX)`);
+    // Only the secret still varies; blank it or the golden could never match.
+    await page.$eval('[data-testid="revealed-token"]', (el) => {
+      el.value = 'mdb_pat_<redacted for screenshot stability>';
+    });
+    // The list refreshes behind the dialog once the create resolves; wait for it so the
+    // capture is not racing that render.
+    await page.waitForSelector('[data-testid="token-list"]');
+    await capture(page, 'token-revealed');
+
+    await page.click('[data-testid="dismiss-token"]');
+    await page.waitForSelector('[data-testid="token-list"]');
+    await capture(page, 'account-with-token');
+
+    // ---- Behaviour: the bot is a distinct identity, capped at its owner ---------
+    const meResp = await api(`${base}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${botToken}` },
+    });
+    const me = await meResp.json();
+    if (me.username !== botIdentity) {
+      throw new Error(`bot should act as its own identity, got ${JSON.stringify(me)}`);
+    }
+    if (me.owner_username !== 'admin' || me.is_bot !== true) {
+      throw new Error(`bot should report its owner, got ${JSON.stringify(me)}`);
+    }
+    if (me.is_admin !== false) {
+      throw new Error('a bot must never be an admin, even when its owner is');
+    }
+    log(`behaviour       bot authenticates as ${me.username}, owner admin, is_admin false`);
+
+    // The owner is an admin, but the bot must still be refused root creation.
+    const botRoot = await api(`${base}/api/create_root_component`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${botToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name: 'bot_root', description: '' }),
+    });
+    if (botRoot.status !== 403) {
+      throw new Error(`bot root creation should be 403, got ${botRoot.status}`);
+    }
+    log('behaviour       bot refused root creation (403) despite admin owner');
+
+    // ---- Steps 14-17: grant the bot access to a component it could not see ------
+    //
+    // This is the whole feature end to end: a bot starts with nothing (PUBLIC does not
+    // apply to automation), gets added to a component's ACL like any user, and only then
+    // can see it.
+    const listAsBot = async () => {
+      const resp = await api(`${base}/api/component_list`, {
+        headers: { Authorization: `Bearer ${botToken}` },
+      });
+      return resp.json();
+    };
+
+    const beforeGrant = await listAsBot();
+    if (beforeGrant.length !== 0) {
+      throw new Error(
+        `a bot with no explicit grant must see nothing, saw ${JSON.stringify(beforeGrant)}`
+      );
+    }
+    log('behaviour       bot sees 0 components before being granted anything');
+
+    // Create a component to grant it access to.
+    await page.goto(`${base}/create_component`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('[data-testid="component-name"]');
+    await page.type('[data-testid="component-name"]', 'bot_playground');
+    await page.click('button::-p-text(Create Component)');
+    // The view navigates to '/' on success; let that finish before the next goto, or the
+    // two navigations race and the frame detaches.
+    await page.waitForFunction(() => window.location.pathname === '/');
+    await page.waitForSelector('::-p-text(Components)');
+    await capture(page, 'component-created-for-bot');
+
+    // Find it, then open its Access tab.
+    const created = await (
+      await api(`${base}/api/component_list`, {
+        headers: { Authorization: `Bearer ${apiToken}` },
+      })
+    ).json();
+    const target = created.find((c) => c.name === 'bot_playground');
+    if (!target) throw new Error('bot_playground was not created');
+
+    await page.goto(`${base}/component/${target.id}`, { waitUntil: 'domcontentloaded' });
+    await page.click('button::-p-text(Access)');
+    await page.waitForSelector('[data-testid="members-issue-contributors"]');
+    await capture(page, 'component-access-tab');
+
+    // Add the bot to the Issue Contributors group, exactly as you would a username.
+    //
+    // Typed with real key events rather than by assigning `.value`: these are controlled
+    // React inputs, and a direct assignment updates the DOM without notifying React, so
+    // the change would be silently discarded on the next render.
+    const membersField = '[data-testid="members-issue-contributors"]';
+    await page.waitForSelector(membersField);
+    await page.click(membersField, { clickCount: 3 });
+    await page.keyboard.press('Backspace');
+    await page.type(membersField, `PUBLIC, ${botIdentity}`);
+    // The field keeps raw text while focused and commits on blur, so the change must be
+    // committed before saving.
+    await page.$eval(membersField, (el) => el.blur());
+
+    const saved = page.waitForResponse(
+      (r) => r.url().includes('/update_metadata') && r.request().method() === 'POST'
+    );
+    // Dispatched in-page rather than via page.click: puppeteer's actionability checks
+    // wait for the element to stop moving, and this form re-renders enough that the
+    // click never becomes "stable", blocking past any timeout.
+    await page.$eval('[data-testid="save-component"]', (el) => el.click());
+    const savedResp = await saved;
+    if (!savedResp.ok()) {
+      throw new Error(`saving component access failed: HTTP ${savedResp.status()}`);
+    }
+
+
+    await capture(page, 'bot-added-to-component');
+
+    const afterGrant = await listAsBot();
+    if (!afterGrant.some((c) => c.name === 'bot_playground')) {
+      throw new Error(
+        `bot should see the component it was granted, saw ${JSON.stringify(afterGrant)}`
+      );
+    }
+    log('behaviour       bot sees the component only after being added explicitly');
+
     // Assert on behaviour too, not only on pixels: a screenshot cannot tell us the old
     // password stopped working.
-    const stillWorks = await fetch(`${base}/api/auth/login`, {
+    const stillWorks = await api(`${base}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: 'admin', password: adminPassword }),

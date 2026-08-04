@@ -40,10 +40,46 @@ Steps, in capture order:
 | 8 | `create-component-admin` | An admin sees the root-component toggle |
 | 9 | `root-toggle-on` | Toggling it replaces the parent picker with an ownership warning |
 | 10 | `after-creating-root` | The new root is created and listed without a restart |
+| 11 | `user-menu-open` | The avatar menu offers Account |
+| 12 | `account-view` | Owned components, bugs you are on, and bot tokens |
+| 13 | `token-revealed` | A new token is shown once (secret blanked for stability) |
+| 14 | `account-with-token` | The token is listed by its generated ACL name |
+| 15 | `component-created-for-bot` | A component created through the UI |
+| 16 | `component-access-tab` | Its permission groups |
+| 17 | `bot-added-to-component` | The bot added to a group, saved |
 
 It also asserts non-visual behaviour a screenshot cannot capture: the root component
-really exists in `/api/component_list` afterwards, and the original bootstrap password is
-rejected with 401 once rotated.
+really exists in `/api/component_list` afterwards; the original bootstrap password is
+rejected with 401 once rotated; and the created bot token authenticates as
+`bot:ci-agent` with `owner_username: admin`, `is_admin: false`, and is refused root
+creation with 403 even though its owner is an admin.
+
+The runner starts the backend with `MD_BUG_BOT_SUFFIX=fixed_test_bot`, which pins the
+generated bot identity to `admin--fixed_test_bot`. That keeps the name out of the
+"varies every run" category entirely, so no screenshot has to be scrubbed for it — and
+the run can assert the exact identity instead of a regex.
+
+Only the token **secret** is still blanked before capture (step 13). It is deliberately
+not fixable: a predictable token secret would be a real vulnerability if the knob were
+ever set outside a test.
+
+### Determinism traps hit while writing these
+
+- **Native `alert()` blocks forever.** Several views report success with `alert()`, and
+  puppeteer never dismisses dialogs on its own. An un-handled one hangs the run past any
+  timeout with no error — it looks exactly like an infinite loop. `run.mjs` registers a
+  `dialog` handler that accepts and logs them.
+- **`waitUntil: 'networkidle0'` never settles** in this SPA, so every `goto` burned its
+  full timeout. Use `domcontentloaded` plus an explicit `waitForSelector`.
+- **Node's `fetch` has no default timeout** — a stuck request hangs with no output. The
+  `api()` helper adds one.
+- **`page.click` waits for the element to stop moving**; on a re-rendering form that never
+  happens. Click via `$eval(el => el.click())` instead.
+- **Scroll position** varies between runs, and the app scrolls an inner container rather
+  than the window; `capture()` resets both.
+- **Rust `HashMap` iteration order is randomised per process**, so the component's
+  permission groups arrived in a different order every run. Fixed in the UI by sorting
+  the groups by name — which also stops them reshuffling for real users.
 
 ## Goldens
 
@@ -57,7 +93,9 @@ are pixel-identical back to back (0 px), and changing one line of copy failed th
 screenshots with 563 px each.
 
 Screenshots are only as stable as what they capture. `run.mjs` freezes CSS animations and
-transitions and hides the text caret before every capture; if you add a step showing
+transitions (to 1ms, not 0s — at 0s MUI's exit callbacks never fire and popovers stay
+mounted, their backdrop swallowing later clicks) and hides the text caret before every
+capture; if you add a step showing
 timestamps, generated ids, or anything else that varies per run, it will flake.
 
 **Regenerate goldens deliberately, never reflexively.** `npm run update-goldens` accepts

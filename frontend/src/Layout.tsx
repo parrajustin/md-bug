@@ -249,7 +249,11 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchVa
               />
             </Search>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }} onClick={(e) => setAnchorEl(e.currentTarget)}>
+          <Box
+            sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }}
+            onClick={(e) => setAnchorEl(e.currentTarget)}
+            data-testid="user-menu"
+          >
             <Typography variant="body2" color="text.secondary">
               {username}
             </Typography>
@@ -263,7 +267,13 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchVa
               transformOrigin={{ horizontal: 'right', vertical: 'top' }}
               anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
             >
-              <MenuItem onClick={handleSignOut}>Sign out</MenuItem>
+              <MenuItem
+              onClick={() => { setAnchorEl(null); navigate('/account'); }}
+              data-testid="menu-account"
+            >
+              Account
+            </MenuItem>
+            <MenuItem onClick={handleSignOut}>Sign out</MenuItem>
             </Menu>
           </Box>
         </Toolbar>

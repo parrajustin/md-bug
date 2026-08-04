@@ -286,6 +286,16 @@ impl Default for AccessMetadata {
     }
 }
 
+/// Whether `PUBLIC` should count as a match for this identity.
+///
+/// Bots are excluded from the wildcard: `PUBLIC` means "every person", and a bot is
+/// automation that must be granted access deliberately. Otherwise any leaked token would
+/// inherit read access to every component with a PUBLIC contributor group, which is the
+/// opposite of the least-privilege the cap is meant to provide.
+fn public_applies_to(username: &str) -> bool {
+    !crate::auth::is_bot_identity(username)
+}
+
 impl ComponentMetadata {
     pub fn empty() -> Self {
         let mut templates = HashMap::new();
@@ -313,7 +323,8 @@ impl ComponentMetadata {
     pub fn has_permission(&self, username: &str, permission: &Permission) -> bool {
         for group in self.access_control.groups.values() {
             if (group.members.contains(&username.to_string())
-                || group.members.contains(&"PUBLIC".to_string()))
+                || (public_applies_to(username)
+                    && group.members.contains(&"PUBLIC".to_string())))
                 && (group.permissions.contains(permission)
                     || group.permissions.contains(&Permission::ComponentAdmin))
             {
@@ -411,7 +422,8 @@ impl BugMetadata {
         // Note: Reporter doesn't have implicit access (they are added to full_access on creation).
         for group in resolved_meta.access_control.groups.values() {
             if group.members.contains(&username.to_string())
-                || group.members.contains(&"PUBLIC".to_string())
+                || (public_applies_to(username)
+                    && group.members.contains(&"PUBLIC".to_string()))
             {
                 if group.permissions.contains(&Permission::AdminIssues)
                     || group.permissions.contains(&Permission::EditIssues)
@@ -425,7 +437,8 @@ impl BugMetadata {
         // INHERIT from component (non-sovereign permissions)
         for group in resolved_meta.access_control.groups.values() {
             if group.members.contains(&username.to_string())
-                || group.members.contains(&"PUBLIC".to_string())
+                || (public_applies_to(username)
+                    && group.members.contains(&"PUBLIC".to_string()))
             {
                 // EditIssues moved to sovereign section above
                 if group.permissions.contains(&Permission::CommentOnIssues) {
@@ -442,7 +455,7 @@ impl BugMetadata {
             .access
             .full_access
             .iter()
-            .any(|u| u == username || u == "PUBLIC")
+            .any(|u| u == username || (public_applies_to(username) && u == "PUBLIC"))
         {
             max_level = std::cmp::max(max_level, UserAccessLevel::Full);
         }
@@ -450,7 +463,7 @@ impl BugMetadata {
             .access
             .comment_access
             .iter()
-            .any(|u| u == username || u == "PUBLIC")
+            .any(|u| u == username || (public_applies_to(username) && u == "PUBLIC"))
         {
             max_level = std::cmp::max(max_level, UserAccessLevel::Comment);
         }
@@ -458,7 +471,7 @@ impl BugMetadata {
             .access
             .view_access
             .iter()
-            .any(|u| u == username || u == "PUBLIC")
+            .any(|u| u == username || (public_applies_to(username) && u == "PUBLIC"))
         {
             max_level = std::cmp::max(max_level, UserAccessLevel::View);
         }
@@ -618,6 +631,11 @@ pub struct ComponentSummary {
     pub description: String,
     pub folders: Vec<String>,
     pub parent_id: u32,
+    /// Who created it. Ownership is deliberately `creator`, not "is a Component Admin":
+    /// admin rights are inherited down the tree and `PUBLIC` matches everyone, so an
+    /// admin check would report whole subtrees rather than what you actually made.
+    #[serde(default)]
+    pub creator: String,
 }
 
 /// Shared application state.
@@ -706,12 +724,60 @@ impl RequestUser {
     /// It must never be reachable from a request path. Over HTTP the only way to obtain
     /// a `RequestUser` is `from_request_parts`, which requires a valid bearer token.
     pub fn local(username: impl Into<String>, uid: u64, is_admin: bool) -> Self {
+        let username = username.into();
         RequestUser(crate::auth::RequestUser {
-            username: username.into(),
+            owner_username: username.clone(),
+            username,
             uid,
             is_admin,
             via_personal_token: false,
         })
+    }
+
+    /// Builds a bot identity acting under `owner`. Tests and local tooling only.
+    pub fn local_bot(identity: impl Into<String>, owner: impl Into<String>, uid: u64) -> Self {
+        RequestUser(crate::auth::RequestUser {
+            username: identity.into(),
+            owner_username: owner.into(),
+            uid,
+            // A bot is never an admin, whatever its owner is: admin rights create
+            // accounts and mint tokens, which is not something a leaked bot key should
+            // be able to do.
+            is_admin: false,
+            via_personal_token: true,
+        })
+    }
+
+    /// Component permission check, capped at the owner's rights.
+    ///
+    /// **Use this rather than `ComponentMetadata::has_permission` in handlers.** For a
+    /// real user the two are identical. For a bot, the permission must be granted to the
+    /// bot's identity *and* still held by the account that created it — so a bot can be
+    /// given less than its owner but never more, and silently loses access the moment its
+    /// owner does.
+    pub fn can(&self, meta: &ComponentMetadata, permission: &Permission) -> bool {
+        if !meta.has_permission(&self.username, permission) {
+            return false;
+        }
+        if self.is_bot() {
+            return meta.has_permission(&self.owner_username, permission);
+        }
+        true
+    }
+
+    /// Bug access level, capped at the owner's level for bots.
+    ///
+    /// **Use this rather than `BugMetadata::access_level` in handlers.**
+    pub fn bug_access(
+        &self,
+        bug: &BugMetadata,
+        resolved: &ComponentMetadata,
+    ) -> UserAccessLevel {
+        let own = bug.access_level(resolved, &self.username);
+        if self.is_bot() {
+            return own.min(bug.access_level(resolved, &self.owner_username));
+        }
+        own
     }
 }
 
@@ -755,6 +821,13 @@ impl axum::extract::FromRequestParts<Arc<AppState>> for RequestUser {
 
         let via_personal_token = stored.kind == crate::auth::TokenKind::Personal;
 
+        // A personal token acts as its own `bot:` identity when it has one. Tokens
+        // issued before identities existed fall back to acting as their owner.
+        let acting_identity = stored
+            .identity
+            .clone()
+            .unwrap_or_else(|| stored.username.clone());
+
         // Re-read the account rather than trusting the token: admin status and the
         // force-rotate flag can change after a token is issued.
         let user = state
@@ -769,10 +842,15 @@ impl axum::extract::FromRequestParts<Arc<AppState>> for RequestUser {
             return Err((StatusCode::FORBIDDEN, "Password change required"));
         }
 
+        let is_bot = via_personal_token && acting_identity != user.username;
+
         Ok(RequestUser(crate::auth::RequestUser {
-            username: user.username,
+            username: acting_identity,
+            owner_username: user.username,
             uid: user.uid,
-            is_admin: user.is_admin,
+            // Bots are never admins regardless of their owner: admin rights create
+            // accounts and mint tokens, which a leaked bot key must not be able to do.
+            is_admin: user.is_admin && !is_bot,
             via_personal_token,
         }))
     }
@@ -1157,7 +1235,7 @@ pub async fn create_component(
     let parent_meta = resolve_component_metadata(&state.root, &parent_path_str);
 
     // 4. Check authorization
-    let is_authorized = parent_meta.has_permission(&user.username, &Permission::ComponentAdmin);
+    let is_authorized = user.can(&parent_meta, &Permission::ComponentAdmin);
     if !is_authorized {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -1354,7 +1432,7 @@ pub async fn create_bug(
     let component_meta = resolve_component_metadata(&state.root, &component_path_str);
 
     // 4. Permission check
-    if !component_meta.has_permission(&user.username, &Permission::CreateIssues) {
+    if !user.can(&component_meta, &Permission::CreateIssues) {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1516,7 +1594,7 @@ pub async fn add_template(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // 4. Permission check
-    if !meta.has_permission(&user.username, &Permission::ComponentAdmin) {
+    if !user.can(&meta, &Permission::ComponentAdmin) {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1575,7 +1653,7 @@ pub async fn modify_template(
     let mut meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if !meta.has_permission(&user.username, &Permission::ComponentAdmin) {
+    if !user.can(&meta, &Permission::ComponentAdmin) {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1635,7 +1713,7 @@ pub async fn delete_template(
     let mut meta: ComponentMetadata = read_versioned::<ComponentMetadata>(&data)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if !meta.has_permission(&user.username, &Permission::ComponentAdmin) {
+    if !user.can(&meta, &Permission::ComponentAdmin) {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1684,7 +1762,7 @@ pub async fn update_component_metadata(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // 4. Permission check (only ComponentAdmin can update metadata)
-    if !old_meta.has_permission(&user.username, &Permission::ComponentAdmin) {
+    if !user.can(&old_meta, &Permission::ComponentAdmin) {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1718,7 +1796,7 @@ pub async fn get_component_metadata(
     };
     let resolved = resolve_component_metadata(&state.root, &path);
 
-    if !resolved.has_permission(&user.username, &Permission::ViewIssues) {
+    if !user.can(&resolved, &Permission::ViewIssues) {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -1747,7 +1825,7 @@ pub async fn get_component_list(
     for (id, path_str) in cache_data {
         // Permission check on resolved metadata
         let resolved = resolve_component_metadata(&state.root, &path_str);
-        if !resolved.has_permission(&user.username, &Permission::ViewIssues) {
+        if !user.can(&resolved, &Permission::ViewIssues) {
             continue;
         }
 
@@ -1757,18 +1835,20 @@ pub async fn get_component_list(
             .join(path_str.replace('/', std::path::MAIN_SEPARATOR_STR));
         let meta_file = component_path.join("component_metadata");
 
-        let (name, description) = if let Ok(data) = fs::read(&meta_file) {
+        let (name, description, creator) = if let Ok(data) = fs::read(&meta_file) {
             if let Ok(meta) = read_versioned::<ComponentMetadata>(&data) {
-                (meta.name, meta.description)
+                (meta.name, meta.description, meta.creator)
             } else {
                 (
                     path_str.split('/').last().unwrap_or("").to_string(),
+                    "".to_string(),
                     "".to_string(),
                 )
             }
         } else {
             (
                 path_str.split('/').last().unwrap_or("").to_string(),
+                "".to_string(),
                 "".to_string(),
             )
         };
@@ -1802,6 +1882,7 @@ pub async fn get_component_list(
             description,
             folders,
             parent_id,
+            creator,
         });
     }
 
@@ -1815,18 +1896,36 @@ pub async fn get_component_list(
 }
 
 fn match_condition(key: &str, values: &[String], metadata: &BugMetadata, is_exclude: bool) -> bool {
-    let field_value = match key.to_lowercase().as_str() {
-        "id" => metadata.id.to_string(),
-        "status" => metadata.status.clone(),
-        "priority" => metadata.priority.clone(),
-        "severity" => metadata.severity.clone(),
-        "type" => metadata.bug_type.clone(),
-        "assignee" => metadata.assignee.clone(),
-        "reporter" => metadata.reporter.clone(),
-        "componentid" => metadata.component_id.to_string(),
+    // Distinct keywords are ANDed together, so "any of these fields mentions X" cannot be
+    // expressed by combining `reporter:` and `assignee:`. `involves:` exists for that:
+    // it matches if the value appears in *any* participant field, which is what an
+    // account page means by "bugs I am on".
+    let fields: Vec<String> = match key.to_lowercase().as_str() {
+        "id" => vec![metadata.id.to_string()],
+        "status" => vec![metadata.status.clone()],
+        "priority" => vec![metadata.priority.clone()],
+        "severity" => vec![metadata.severity.clone()],
+        "type" => vec![metadata.bug_type.clone()],
+        "assignee" => vec![metadata.assignee.clone()],
+        "reporter" => vec![metadata.reporter.clone()],
+        "verifier" => vec![metadata.verifier.clone()],
+        "cc" => metadata.cc.clone(),
+        "collaborator" => metadata.collaborators.clone(),
+        "componentid" => vec![metadata.component_id.to_string()],
+        "involves" => {
+            let mut all = vec![
+                metadata.reporter.clone(),
+                metadata.assignee.clone(),
+                metadata.verifier.clone(),
+            ];
+            all.extend(metadata.collaborators.iter().cloned());
+            all.extend(metadata.cc.iter().cloned());
+            all
+        }
         _ => return !is_exclude, // Unknown fields don't match, so include fails, exclude passes (not excluded)
     };
 
+    for field_value in &fields {
     for val in values {
         // Support regex if val starts and ends with /
         if val.starts_with('/') && val.ends_with('/') && val.len() > 2 {
@@ -1835,13 +1934,14 @@ fn match_condition(key: &str, values: &[String], metadata: &BugMetadata, is_excl
                 .case_insensitive(true)
                 .build()
             {
-                if re.is_match(&field_value) {
+                if re.is_match(field_value) {
                     return true;
                 }
             }
         } else if field_value.to_lowercase().contains(&val.to_lowercase()) {
             return true;
         }
+    }
     }
 
     false
@@ -1905,7 +2005,6 @@ pub async fn get_bug_list(
     let mut summaries = Vec::new();
     let q_str = query.q.unwrap_or_default();
     let search_query: SearchString = SearchString::parse(&q_str);
-    let u = user.username.clone();
 
     for entry in WalkDir::new(&state.root)
         .into_iter()
@@ -1929,7 +2028,7 @@ pub async fn get_bug_list(
         };
         let resolved_meta = resolve_component_metadata(&state.root, &component_path);
 
-        if metadata.access_level(&resolved_meta, &u) < UserAccessLevel::View {
+        if user.bug_access(&metadata, &resolved_meta) < UserAccessLevel::View {
             continue;
         }
 
@@ -2005,7 +2104,7 @@ pub async fn get_bug(
         )
     };
 
-    if metadata.access_level(&resolved_meta, &user.username) < UserAccessLevel::View {
+    if user.bug_access(&metadata, &resolved_meta) < UserAccessLevel::View {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -2063,7 +2162,7 @@ pub async fn get_bug_state(
         resolve_component_metadata(&state.root, &path)
     };
 
-    if metadata.access_level(&resolved_meta, &user.username) < UserAccessLevel::View {
+    if user.bug_access(&metadata, &resolved_meta) < UserAccessLevel::View {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -2124,7 +2223,7 @@ pub async fn submit_comment(
         resolve_component_metadata(&state.root, &path)
     };
 
-    if metadata.access_level(&resolved_meta, &user.username) < UserAccessLevel::Comment {
+    if user.bug_access(&metadata, &resolved_meta) < UserAccessLevel::Comment {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -2211,7 +2310,7 @@ pub async fn update_bug_metadata(
         resolve_component_metadata(&state.root, &path)
     };
 
-    if metadata.access_level(&resolved_meta, &user.username) < UserAccessLevel::Full {
+    if user.bug_access(&metadata, &resolved_meta) < UserAccessLevel::Full {
         return Err(StatusCode::FORBIDDEN);
     }
 

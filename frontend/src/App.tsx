@@ -16,6 +16,7 @@ import { type StoredSession } from './api/storage';
 import { restoreSession, clearSession, getActiveSession, authApi } from './api/auth_api';
 import LoginView from './LoginView';
 import ChangePasswordView from './ChangePasswordView';
+import AccountView from './AccountView';
 import './styles.css';
 
 interface BugLoaderProps {
@@ -231,6 +232,7 @@ const App: React.FC = () => {
           <Route path="/create_issue" element={<CreateIssueView username={username} />} />
           <Route path="/create_component" element={<CreateComponentView username={username} isAdmin={session.isAdmin} />} />
           <Route path="/component/:id" element={<ComponentEditorView username={username} />} />
+          <Route path="/account" element={<AccountView username={username} isAdmin={session.isAdmin} />} />
           <Route path="/login" element={<LoginView onLogin={handleLogin} />} />
         </Routes>
       </Layout>

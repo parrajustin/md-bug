@@ -11,6 +11,11 @@ This document serves as a high-signal knowledge base for AI agents and developer
   - `integration_tests/`: Jest-based tests that spawn the actual binary for end-to-end validation.
 
 ## Core Mandates & Constraints
+- **Bot tokens:** Personal access tokens are separate ACL identities, auto-named
+  `<owner>--<3_words>` (e.g. `admin--long_cat_fat`), not aliases for their owner. They are
+  excluded from `PUBLIC` grants and must be added explicitly. Permission = granted to the bot AND still held by the
+  owner, enforced via `RequestUser::can` / `RequestUser::bug_access` (never the raw
+  `has_permission` / `access_level`). Bots are never admins. *(Added 2026-08-03.)*
 - **DEFAULT component:** A top-level component named `DEFAULT` (folder `default/`) is
   created automatically on first start, owned by the bootstrap admin, so a fresh install
   is usable straight away. Written only when its `component_metadata` is missing, so

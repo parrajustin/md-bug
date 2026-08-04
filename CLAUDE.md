@@ -82,6 +82,11 @@ database-backed tokens, not the JWTs described in `backend/auth.md` — see
 First run generates an admin password, prints it **once**, and forces a rotation before
 the account can do anything. Accounts are admin-created; there is no self-signup.
 
+Personal access tokens are **bot identities** with generated names
+(`admin--long_cat_fat`), addable to ACLs like a user, capped at their creator's
+permissions, and excluded from `PUBLIC` — see `backend/CLAUDE.md`. Manage them from the
+account page (avatar → Account).
+
 Note the distinction when debugging: **401** means the token is missing, expired or
 invalid; **403** means either a per-component ACL rejected you, a forced password change
 is pending, or you hit the hardcoded root-creation ban. Authentication and authorization

@@ -82,6 +82,8 @@ const ComponentEditorView: React.FC<ComponentEditorViewProps> = ({ username }) =
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [tabValue, setTabValue] = useState(0);
+  /// Raw text per group while the user is typing; committed to `members` on blur.
+  const [memberDrafts, setMemberDrafts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -165,6 +167,7 @@ const ComponentEditorView: React.FC<ComponentEditorViewProps> = ({ username }) =
           startIcon={<SaveIcon />} 
           onClick={handleSave} 
           disabled={isSaving}
+          data-testid="save-component"
           sx={{ borderRadius: '24px', px: 3 }}
         >
           {isSaving ? "Saving..." : "Save Changes"}
@@ -247,7 +250,7 @@ const ComponentEditorView: React.FC<ComponentEditorViewProps> = ({ username }) =
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {Object.entries(metadata.access_control.groups).map(([name, group]) => (
+                  {Object.entries(metadata.access_control.groups).sort(([a], [b]) => a.localeCompare(b)).map(([name, group]) => (
                     <TableRow key={name} hover>
                       <TableCell sx={{ fontWeight: 'bold' }}>{name}</TableCell>
                       {ALL_PERMISSIONS.map(p => {
@@ -282,20 +285,37 @@ const ComponentEditorView: React.FC<ComponentEditorViewProps> = ({ username }) =
 
             <Stack spacing={3}>
               <Typography variant="h6">Group Members</Typography>
-              {Object.entries(metadata.access_control.groups).map(([name, group]) => (
+              {Object.entries(metadata.access_control.groups).sort(([a], [b]) => a.localeCompare(b)).map(([name, group]) => (
                 <Box key={name}>
                   <Typography variant="subtitle2" gutterBottom>{name}</Typography>
                   <TextField
                     fullWidth
                     size="small"
                     placeholder="user1, user2, PUBLIC..."
-                    value={group.members.join(', ')}
-                    onChange={(e) => {
+                    // Edit as raw text and only split on blur. Splitting on every
+                    // keystroke re-derived the value as members.join(', '), which ate the
+                    // comma the moment you typed it — making a second member impossible
+                    // to enter by typing.
+                    value={memberDrafts[name] ?? group.members.join(', ')}
+                    onChange={(e) =>
+                      setMemberDrafts((drafts) => ({ ...drafts, [name]: e.target.value }))
+                    }
+                    onBlur={() => {
+                      const draft = memberDrafts[name];
+                      if (draft === undefined) return;
                       const newGroups = { ...metadata.access_control.groups };
-                      newGroups[name] = { ...group, members: e.target.value.split(',').map(s => s.trim()).filter(s => s !== '') };
+                      newGroups[name] = {
+                        ...group,
+                        members: draft.split(',').map((s) => s.trim()).filter((s) => s !== ''),
+                      };
                       updateField('access_control', { ...metadata.access_control, groups: newGroups });
                     }}
-                    helperText={`Users in ${name} group.`}
+                    helperText={`Users in ${name} group. Separate with commas.`}
+                    slotProps={{
+                      htmlInput: {
+                        'data-testid': `members-${name.replace(/\s+/g, '-').toLowerCase()}`,
+                      },
+                    }}
                   />
                 </Box>
               ))}

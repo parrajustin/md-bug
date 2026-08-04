@@ -254,12 +254,14 @@ impl UserManager {
 
     /// Mints a token for `username` and persists its hash. The returned plaintext is the
     /// only time the caller can ever see it.
+    #[allow(clippy::too_many_arguments)]
     pub async fn issue_token(
         &self,
         username: &str,
         uid: u64,
         kind: TokenKind,
         label: Option<String>,
+        identity: Option<String>,
         ttl_secs: Option<u64>,
     ) -> anyhow::Result<NewToken> {
         let mut db = self.db.write().await;
@@ -267,7 +269,8 @@ impl UserManager {
         let mut data = tree.into::<UserDb>()?;
 
         data.last_token_id += 1;
-        let token = auth::build_token(data.last_token_id, kind, username, uid, label, ttl_secs);
+        let token =
+            auth::build_token(data.last_token_id, kind, username, uid, label, identity, ttl_secs);
         data.tokens.push(token.stored.clone());
 
         db.insert("data", data).await?;
@@ -333,6 +336,20 @@ impl UserManager {
         db.insert("data", data).await?;
         db.write().await?;
         Ok(())
+    }
+
+    /// True when any token already claims this bot identity.
+    pub async fn has_bot_identity(&self, identity: &str) -> bool {
+        let db = self.db.read().await;
+        let Ok(tree) = db.data().await.get("data") else {
+            return false;
+        };
+        let Ok(data) = tree.into::<UserDb>() else {
+            return false;
+        };
+        data.tokens
+            .iter()
+            .any(|t| t.identity.as_deref() == Some(identity))
     }
 
     pub async fn list_tokens(&self, username: &str, kind: TokenKind) -> anyhow::Result<Vec<StoredToken>> {

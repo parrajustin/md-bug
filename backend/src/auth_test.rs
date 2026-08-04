@@ -11,7 +11,7 @@ fn generated_secrets_are_unique_and_long() {
 
 #[test]
 fn round_trips_a_built_token() {
-    let token = build_token(7, TokenKind::Access, "alice", 1, None, Some(60));
+    let token = build_token(7, TokenKind::Access, "alice", 1, None, None, Some(60));
     let (kind, id, secret) = parse_token(&token.plaintext).expect("should parse");
 
     assert_eq!(kind, TokenKind::Access);
@@ -21,7 +21,7 @@ fn round_trips_a_built_token() {
 
 #[test]
 fn stores_only_the_hash_not_the_secret() {
-    let token = build_token(1, TokenKind::Personal, "alice", 1, None, None);
+    let token = build_token(1, TokenKind::Personal, "alice", 1, None, None, None);
     let (_, _, secret) = parse_token(&token.plaintext).expect("should parse");
 
     assert_ne!(token.stored.secret_hash, secret);
@@ -31,13 +31,13 @@ fn stores_only_the_hash_not_the_secret() {
 
 #[test]
 fn rejects_a_wrong_secret() {
-    let token = build_token(3, TokenKind::Access, "alice", 1, None, Some(60));
+    let token = build_token(3, TokenKind::Access, "alice", 1, None, None, Some(60));
     assert!(!verify_stored(&token.stored, "not-the-secret", now_secs()));
 }
 
 #[test]
 fn rejects_an_expired_token() {
-    let token = build_token(3, TokenKind::Access, "alice", 1, None, Some(60));
+    let token = build_token(3, TokenKind::Access, "alice", 1, None, None, Some(60));
     let (_, _, secret) = parse_token(&token.plaintext).expect("should parse");
 
     assert!(verify_stored(&token.stored, &secret, now_secs()));
@@ -49,7 +49,7 @@ fn rejects_an_expired_token() {
 
 #[test]
 fn personal_tokens_can_be_non_expiring() {
-    let token = build_token(1, TokenKind::Personal, "alice", 1, Some("ci".into()), None);
+    let token = build_token(1, TokenKind::Personal, "alice", 1, Some("ci".into()), None, None);
     assert_eq!(token.stored.expires_at, None);
     assert!(!token.stored.is_expired(now_secs() + 60 * 60 * 24 * 365 * 10));
 }
@@ -71,8 +71,8 @@ fn rejects_malformed_tokens() {
 
 #[test]
 fn token_kinds_are_distinguishable() {
-    let access = build_token(1, TokenKind::Access, "alice", 1, None, Some(60));
-    let personal = build_token(1, TokenKind::Personal, "alice", 1, None, None);
+    let access = build_token(1, TokenKind::Access, "alice", 1, None, None, Some(60));
+    let personal = build_token(1, TokenKind::Personal, "alice", 1, None, None, None);
 
     assert!(access.plaintext.starts_with("mdb_at_"));
     assert!(personal.plaintext.starts_with("mdb_pat_"));
@@ -94,4 +94,19 @@ fn rejects_non_bearer_authorization() {
     assert_eq!(bearer_from_header(Some("Basic abc")), None);
     assert_eq!(bearer_from_header(Some("abc")), None);
     assert_eq!(bearer_from_header(Some("Bearer ")), None);
+}
+
+#[test]
+fn bot_suffix_can_be_pinned_for_tests() {
+    // Serialised implicitly: this is the only test touching the variable.
+    unsafe { std::env::set_var(BOT_SUFFIX_ENV, "fixed_test_bot") };
+    assert_eq!(generate_bot_identity("admin"), "admin--fixed_test_bot");
+    assert_eq!(generate_bot_identity("alice"), "alice--fixed_test_bot");
+
+    // An empty value must not pin anything, or a stray export would freeze every name.
+    unsafe { std::env::set_var(BOT_SUFFIX_ENV, "") };
+    assert_ne!(generate_bot_identity("admin"), "admin--");
+
+    unsafe { std::env::remove_var(BOT_SUFFIX_ENV) };
+    assert!(is_bot_identity(&generate_bot_identity("admin")));
 }

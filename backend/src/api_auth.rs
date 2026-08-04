@@ -65,6 +65,7 @@ pub async fn login(
             uid,
             TokenKind::Access,
             None,
+            None,
             Some(ACCESS_TOKEN_TTL_SECS),
         )
         .await
@@ -76,6 +77,7 @@ pub async fn login(
             &user.username,
             uid,
             TokenKind::Refresh,
+            None,
             None,
             Some(REFRESH_TOKEN_TTL_SECS),
         )
@@ -124,6 +126,7 @@ pub async fn refresh(
             stored.uid,
             TokenKind::Access,
             None,
+            None,
             Some(ACCESS_TOKEN_TTL_SECS),
         )
         .await
@@ -135,6 +138,7 @@ pub async fn refresh(
             &stored.username,
             stored.uid,
             TokenKind::Refresh,
+            None,
             None,
             Some(REFRESH_TOKEN_TTL_SECS),
         )
@@ -209,7 +213,7 @@ pub async fn logout(
     for kind in [TokenKind::Access, TokenKind::Refresh] {
         state
             .users
-            .revoke_tokens_for_user(&user.username, Some(kind))
+            .revoke_tokens_for_user(&user.owner_username, Some(kind))
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
@@ -219,18 +223,23 @@ pub async fn logout(
 #[derive(Serialize)]
 pub struct MeResponse {
     pub username: String,
+    /// The human account behind the request; differs from `username` for a bot.
+    pub owner_username: String,
     pub uid: u64,
     pub is_admin: bool,
     pub via_personal_token: bool,
+    pub is_bot: bool,
 }
 
 /// `GET /api/auth/me` — who the presented token belongs to.
 pub async fn me(user: RequestUser) -> impl IntoResponse {
     Json(MeResponse {
         username: user.username.clone(),
+        owner_username: user.owner_username.clone(),
         uid: user.uid,
         is_admin: user.is_admin,
         via_personal_token: user.via_personal_token,
+        is_bot: user.is_bot(),
     })
 }
 
@@ -260,9 +269,14 @@ pub async fn create_user(
     if !user.is_admin {
         return Err(StatusCode::FORBIDDEN);
     }
-    if payload.username.trim().is_empty() || payload.username == "PUBLIC" {
+    if payload.username.trim().is_empty()
+        || payload.username == "PUBLIC"
+        || payload.username.contains(':')
+        || payload.username.contains(crate::auth::BOT_IDENTITY_SEPARATOR)
+    {
         // "PUBLIC" is the wildcard member in every ACL; a real account by that name
-        // would silently inherit every grant in the system.
+        // would silently inherit every grant in the system. ':' is reserved for the
+        // bot namespace (`--`), so a username can never impersonate a token identity.
         return Err(StatusCode::BAD_REQUEST);
     }
     if payload.password.len() < MIN_PASSWORD_LEN {
@@ -326,15 +340,17 @@ pub async fn list_users(
     Ok(Json(summaries))
 }
 
-#[derive(Deserialize)]
-pub struct CreateTokenRequest {
-    pub label: String,
-}
+/// Token creation takes no input: the name is generated, so there is nothing to supply.
+#[derive(Deserialize, Default)]
+pub struct CreateTokenRequest {}
 
 #[derive(Serialize)]
 pub struct CreateTokenResponse {
     pub id: u64,
     pub label: String,
+    /// The ACL name this token acts as, e.g. `bot:ci-agent`. Add this to component groups
+    /// or bug access lists exactly as you would a username.
+    pub identity: String,
     /// The only time the plaintext is ever returned. Nothing stores it.
     pub token: String,
 }
@@ -346,15 +362,31 @@ pub struct CreateTokenResponse {
 pub async fn create_personal_token(
     State(state): State<Arc<AppState>>,
     user: RequestUser,
-    Json(payload): Json<CreateTokenRequest>,
+    Json(_payload): Json<CreateTokenRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // A personal token cannot mint further tokens: that would let a leaked token renew
     // itself indefinitely even after the original was revoked.
     if user.via_personal_token {
         return Err(StatusCode::FORBIDDEN);
     }
-    if payload.label.trim().is_empty() {
-        return Err(StatusCode::BAD_REQUEST);
+
+    // Names are generated, not chosen. Retry on the (unlikely) chance of a collision —
+    // an ACL entry has to refer to exactly one token.
+    let mut identity = String::new();
+    let mut found = false;
+    for _ in 0..8 {
+        let candidate = crate::auth::generate_bot_identity(&user.username);
+        if !state.users.has_bot_identity(&candidate).await {
+            identity = candidate;
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        // Only reachable when the generator keeps producing a taken name — in practice
+        // that means MD_BUG_BOT_SUFFIX pins it and a token already holds it. A conflict
+        // is the honest answer; a 500 would suggest a server fault.
+        return Err(StatusCode::CONFLICT);
     }
 
     let token = state
@@ -363,7 +395,8 @@ pub async fn create_personal_token(
             &user.username,
             user.uid,
             TokenKind::Personal,
-            Some(payload.label.clone()),
+            Some(identity.clone()),
+            Some(identity.clone()),
             None,
         )
         .await
@@ -373,7 +406,8 @@ pub async fn create_personal_token(
         StatusCode::CREATED,
         Json(CreateTokenResponse {
             id: token.stored.id,
-            label: payload.label,
+            label: identity.clone(),
+            identity,
             token: token.plaintext,
         }),
     ))
@@ -383,6 +417,8 @@ pub async fn create_personal_token(
 pub struct TokenSummary {
     pub id: u64,
     pub label: Option<String>,
+    /// The ACL name, so the UI can show what to paste into a component or bug.
+    pub identity: Option<String>,
     pub created_at: u64,
 }
 
@@ -393,7 +429,7 @@ pub async fn list_personal_tokens(
 ) -> Result<impl IntoResponse, StatusCode> {
     let tokens = state
         .users
-        .list_tokens(&user.username, TokenKind::Personal)
+        .list_tokens(&user.owner_username, TokenKind::Personal)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -402,6 +438,7 @@ pub async fn list_personal_tokens(
         .map(|t| TokenSummary {
             id: t.id,
             label: t.label,
+            identity: t.identity,
             created_at: t.created_at,
         })
         .collect();
@@ -420,7 +457,7 @@ pub async fn revoke_personal_token(
 ) -> Result<impl IntoResponse, StatusCode> {
     let tokens = state
         .users
-        .list_tokens(&user.username, TokenKind::Personal)
+        .list_tokens(&user.owner_username, TokenKind::Personal)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

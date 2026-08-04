@@ -117,7 +117,7 @@ async fn issues_and_verifies_a_token() {
         .expect("create");
 
     let token = mgr
-        .issue_token("alice", uid, TokenKind::Access, None, Some(3600))
+        .issue_token("alice", uid, TokenKind::Access, None, None, Some(3600))
         .await
         .expect("issue");
 
@@ -138,7 +138,7 @@ async fn rejects_a_token_of_the_wrong_kind() {
         .expect("create");
 
     let refresh = mgr
-        .issue_token("alice", uid, TokenKind::Refresh, None, Some(3600))
+        .issue_token("alice", uid, TokenKind::Refresh, None, None, Some(3600))
         .await
         .expect("issue");
 
@@ -162,7 +162,7 @@ async fn rejects_a_forged_token() {
         .expect("create");
 
     let token = mgr
-        .issue_token("alice", uid, TokenKind::Access, None, Some(3600))
+        .issue_token("alice", uid, TokenKind::Access, None, None, Some(3600))
         .await
         .expect("issue");
 
@@ -186,7 +186,7 @@ async fn consume_token_is_single_use() {
         .expect("create");
 
     let token = mgr
-        .issue_token("alice", uid, TokenKind::Refresh, None, Some(3600))
+        .issue_token("alice", uid, TokenKind::Refresh, None, None, Some(3600))
         .await
         .expect("issue");
 
@@ -211,7 +211,7 @@ async fn expired_tokens_do_not_verify() {
         .expect("create");
 
     let token = mgr
-        .issue_token("alice", uid, TokenKind::Access, None, Some(0))
+        .issue_token("alice", uid, TokenKind::Access, None, None, Some(0))
         .await
         .expect("issue");
 
@@ -234,11 +234,11 @@ async fn revokes_tokens_for_one_user_only() {
         .expect("create");
 
     let alice_token = mgr
-        .issue_token("alice", alice, TokenKind::Access, None, Some(3600))
+        .issue_token("alice", alice, TokenKind::Access, None, None, Some(3600))
         .await
         .expect("issue");
     let bob_token = mgr
-        .issue_token("bob", bob, TokenKind::Access, None, Some(3600))
+        .issue_token("bob", bob, TokenKind::Access, None, None, Some(3600))
         .await
         .expect("issue");
 
@@ -268,13 +268,13 @@ async fn lists_only_the_owners_personal_tokens() {
         .await
         .expect("create");
 
-    mgr.issue_token("alice", alice, TokenKind::Personal, Some("ci".into()), None)
+    mgr.issue_token("alice", alice, TokenKind::Personal, Some("ci".into()), None, None)
         .await
         .expect("issue");
-    mgr.issue_token("alice", alice, TokenKind::Access, None, Some(60))
+    mgr.issue_token("alice", alice, TokenKind::Access, None, None, Some(60))
         .await
         .expect("issue");
-    mgr.issue_token("bob", bob, TokenKind::Personal, Some("bobs".into()), None)
+    mgr.issue_token("bob", bob, TokenKind::Personal, Some("bobs".into()), None, None)
         .await
         .expect("issue");
 
@@ -294,11 +294,11 @@ async fn prunes_expired_tokens_and_keeps_live_ones() {
         .await
         .expect("create");
 
-    mgr.issue_token("alice", uid, TokenKind::Access, None, Some(0))
+    mgr.issue_token("alice", uid, TokenKind::Access, None, None, Some(0))
         .await
         .expect("issue");
     let live = mgr
-        .issue_token("alice", uid, TokenKind::Access, None, Some(3600))
+        .issue_token("alice", uid, TokenKind::Access, None, None, Some(3600))
         .await
         .expect("issue");
 

@@ -165,21 +165,24 @@ export class FakeApi implements API {
         name: "Jetpack (androidx)",
         description: "Android Jetpack components",
         folders: ["Android Public Tracker", "App Development"],
-        parent_id: 2
+        parent_id: 2,
+        creator: "fake_user"
       },
       {
         id: 2,
         name: "App Development",
         description: "App development related issues",
         folders: ["Android Public Tracker"],
-        parent_id: 3
+        parent_id: 3,
+        creator: "fake_user"
       },
       {
         id: 3,
         name: "Android Public Tracker",
         description: "Public tracker for Android",
         folders: [],
-        parent_id: 0
+        parent_id: 0,
+        creator: "fake_user"
       }
     ];
     return Ok(components);

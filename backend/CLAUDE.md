@@ -102,10 +102,45 @@ Three kinds:
 |---|---|---|---|
 | Access | `mdb_at_` | 12h | Normal session |
 | Refresh | `mdb_rt_` | 30d | Rotated on use — single-use, consumed on redemption |
-| Personal | `mdb_pat_` | none | Long-lived, acts as its owner; for agents and CI |
+| Personal | `mdb_pat_` | none | Long-lived bot identity; for agents and CI |
 
 A personal token **cannot mint further tokens** (else a leaked one renews itself forever),
 and `logout` deliberately leaves them alive — they represent automation, not the session.
+
+### Bot identities and the permission cap
+
+A personal token is **its own identity**, not an alias for its owner. Its name is
+**generated**, never chosen: `<owner>--<word>_<word>_<word>`, e.g. `admin--long_cat_fat`.
+That name goes into component groups and bug access lists exactly like a username.
+
+Usernames may contain neither `--` nor `:`, so the two namespaces cannot collide — without
+a reserved marker, a token named `admin` would match every ACL entry granting `admin`.
+Names are generated rather than user-supplied precisely because a human-chosen label is
+the thing most likely to collide with, or be mistaken for, a real account.
+
+For tests, `MD_BUG_BOT_SUFFIX=<suffix>` pins the generated suffix so identities are
+reproducible (the e2e uses this). Only the name is fixable — the secret is always CSPRNG,
+since a predictable one would be a real vulnerability if the variable leaked into a
+deployment. If the pinned name is already taken, token creation returns **409**.
+
+Every permission decision is **capped at the owner's**: the bot must be granted the
+permission *and* the creating account must still hold it. So a bot can be given less than
+its owner, never more, and loses access automatically when its owner is demoted.
+
+Enforce this through `RequestUser::can` and `RequestUser::bug_access`, **never**
+`ComponentMetadata::has_permission` / `BugMetadata::access_level` directly — the raw
+functions take a bare `&str` and know nothing about capping. All 13 handler call sites go
+through the capped helpers.
+
+Bots are **never admins**, whatever their owner is: admin rights create accounts and mint
+tokens, which a leaked bot key must not be able to do. That also means bots cannot create
+root components.
+
+Bots are **excluded from `PUBLIC`**. `PUBLIC` means "every person"; automation must be
+granted access deliberately, or a leaked token would inherit read access to every
+component with a PUBLIC contributor group. This is enforced inside the permission
+primitives themselves (`public_applies_to`), not at the call sites, so it cannot be
+forgotten. A fresh bot therefore sees nothing until it is added to something.
 
 ### Bootstrap and accounts
 
