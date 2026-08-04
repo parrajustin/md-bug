@@ -1132,3 +1132,33 @@ async fn generated_bot_identities_are_namespaced_and_varied() {
     }
     assert!(seen.len() > 1, "generated identities should not be constant");
 }
+
+#[tokio::test]
+async fn an_api_token_acts_as_its_owner_not_as_a_separate_identity() {
+    // An API token is the user's own credential: ACL checks must use their username, so
+    // anything they can reach, a script of theirs can reach.
+    let meta = meta_granting(&[("alice", vec![Permission::ComponentAdmin])]);
+
+    // `local` models a session or an API token: identity == owner.
+    let via_api = RequestUser::local("alice", 1, false);
+
+    assert!(!via_api.is_bot());
+    assert!(
+        via_api.can(&meta, &Permission::ComponentAdmin),
+        "an API token inherits its owner's access, unlike a bot"
+    );
+}
+
+#[tokio::test]
+async fn a_bot_does_not_inherit_what_an_api_token_would() {
+    // Same grant, but a bot is a different principal and was never named in it.
+    let meta = meta_granting(&[("alice", vec![Permission::ComponentAdmin])]);
+
+    let bot = RequestUser::local_bot("alice--long_cat_fat", "alice", 1);
+
+    assert!(bot.is_bot());
+    assert!(
+        !bot.can(&meta, &Permission::ComponentAdmin),
+        "a bot must not pick up grants made to its owner"
+    );
+}

@@ -21,7 +21,7 @@ fn round_trips_a_built_token() {
 
 #[test]
 fn stores_only_the_hash_not_the_secret() {
-    let token = build_token(1, TokenKind::Personal, "alice", 1, None, None, None);
+    let token = build_token(1, TokenKind::Bot, "alice", 1, None, None, None);
     let (_, _, secret) = parse_token(&token.plaintext).expect("should parse");
 
     assert_ne!(token.stored.secret_hash, secret);
@@ -49,7 +49,7 @@ fn rejects_an_expired_token() {
 
 #[test]
 fn personal_tokens_can_be_non_expiring() {
-    let token = build_token(1, TokenKind::Personal, "alice", 1, Some("ci".into()), None, None);
+    let token = build_token(1, TokenKind::Bot, "alice", 1, Some("ci".into()), None, None);
     assert_eq!(token.stored.expires_at, None);
     assert!(!token.stored.is_expired(now_secs() + 60 * 60 * 24 * 365 * 10));
 }
@@ -72,13 +72,13 @@ fn rejects_malformed_tokens() {
 #[test]
 fn token_kinds_are_distinguishable() {
     let access = build_token(1, TokenKind::Access, "alice", 1, None, None, Some(60));
-    let personal = build_token(1, TokenKind::Personal, "alice", 1, None, None, None);
+    let personal = build_token(1, TokenKind::Bot, "alice", 1, None, None, None);
 
     assert!(access.plaintext.starts_with("mdb_at_"));
-    assert!(personal.plaintext.starts_with("mdb_pat_"));
+    assert!(personal.plaintext.starts_with("mdb_bot_"));
 
     let (kind, _, _) = parse_token(&personal.plaintext).expect("should parse");
-    assert_eq!(kind, TokenKind::Personal);
+    assert_eq!(kind, TokenKind::Bot);
 }
 
 #[test]
@@ -109,4 +109,44 @@ fn bot_suffix_can_be_pinned_for_tests() {
 
     unsafe { std::env::remove_var(BOT_SUFFIX_ENV) };
     assert!(is_bot_identity(&generate_bot_identity("admin")));
+}
+
+#[test]
+fn api_and_bot_tokens_are_distinct_kinds() {
+    // These are easy to conflate, so pin the difference: an API token carries no ACL
+    // identity because it *is* the user; a bot token carries one because it is not.
+    let api = build_token(1, TokenKind::Api, "alice", 1, Some("long_cat_fat".into()), None, None);
+    let bot = build_token(
+        2,
+        TokenKind::Bot,
+        "alice",
+        1,
+        Some("alice--long_cat_fat".into()),
+        Some("alice--long_cat_fat".into()),
+        None,
+    );
+
+    assert!(api.plaintext.starts_with("mdb_api_"));
+    assert!(bot.plaintext.starts_with("mdb_bot_"));
+    assert_eq!(api.stored.identity, None);
+    assert_eq!(bot.stored.identity.as_deref(), Some("alice--long_cat_fat"));
+
+    // Neither may be presented where the other is expected.
+    let (api_kind, _, _) = parse_token(&api.plaintext).expect("parse");
+    let (bot_kind, _, _) = parse_token(&bot.plaintext).expect("parse");
+    assert_eq!(api_kind, TokenKind::Api);
+    assert_eq!(bot_kind, TokenKind::Bot);
+
+    assert!(TokenKind::Api.is_long_lived());
+    assert!(TokenKind::Bot.is_long_lived());
+    assert!(!TokenKind::Access.is_long_lived());
+    assert!(!TokenKind::Refresh.is_long_lived());
+}
+
+#[test]
+fn api_token_labels_carry_no_owner_prefix() {
+    // A label is not an ACL name, so it must not look like a bot identity.
+    let label = generate_token_label();
+    assert_eq!(label.split('_').count(), 3, "expected three words: {label}");
+    assert!(!is_bot_identity(&label), "a label must not read as a bot identity");
 }

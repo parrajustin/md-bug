@@ -227,7 +227,7 @@ pub struct MeResponse {
     pub owner_username: String,
     pub uid: u64,
     pub is_admin: bool,
-    pub via_personal_token: bool,
+    pub via_long_lived_token: bool,
     pub is_bot: bool,
 }
 
@@ -238,7 +238,7 @@ pub async fn me(user: RequestUser) -> impl IntoResponse {
         owner_username: user.owner_username.clone(),
         uid: user.uid,
         is_admin: user.is_admin,
-        via_personal_token: user.via_personal_token,
+        via_long_lived_token: user.via_long_lived_token,
         is_bot: user.is_bot(),
     })
 }
@@ -341,37 +341,85 @@ pub async fn list_users(
 }
 
 /// Token creation takes no input: the name is generated, so there is nothing to supply.
+/// Token creation takes no input: names are generated, so there is nothing to supply.
 #[derive(Deserialize, Default)]
 pub struct CreateTokenRequest {}
 
 #[derive(Serialize)]
-pub struct CreateTokenResponse {
+pub struct CreateApiTokenResponse {
     pub id: u64,
+    /// A readable label so the owner can tell their tokens apart. Not an ACL name.
     pub label: String,
-    /// The ACL name this token acts as, e.g. `bot:ci-agent`. Add this to component groups
-    /// or bug access lists exactly as you would a username.
-    pub identity: String,
     /// The only time the plaintext is ever returned. Nothing stores it.
     pub token: String,
 }
 
-/// `POST /api/auth/tokens` — mint a personal access token for the caller.
+/// `POST /api/auth/tokens` — mint an **API token**, which acts as the caller.
 ///
-/// These do not expire and act as the issuing user, which is what makes them usable by
-/// agents and CI. They are also why `logout` leaves them alone.
-pub async fn create_personal_token(
+/// This is the user's own credential for scripting against the API: it carries exactly
+/// the permissions the user has and has no separate identity. For a credential that is
+/// its own account, see `create_bot_token`.
+pub async fn create_api_token(
     State(state): State<Arc<AppState>>,
     user: RequestUser,
     Json(_payload): Json<CreateTokenRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    // A personal token cannot mint further tokens: that would let a leaked token renew
-    // itself indefinitely even after the original was revoked.
-    if user.via_personal_token {
+    // A token cannot mint further tokens: that would let a leaked one renew itself
+    // indefinitely even after the original was revoked.
+    if user.via_long_lived_token {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let label = crate::auth::generate_token_label();
+    let token = state
+        .users
+        .issue_token(
+            &user.username,
+            user.uid,
+            TokenKind::Api,
+            Some(label.clone()),
+            // No identity: an API token *is* the user, so ACL checks use their username.
+            None,
+            None,
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateApiTokenResponse {
+            id: token.stored.id,
+            label,
+            token: token.plaintext,
+        }),
+    ))
+}
+
+#[derive(Serialize)]
+pub struct CreateBotTokenResponse {
+    pub id: u64,
+    /// The ACL name this token acts as, e.g. `admin--long_cat_fat`. Add it to component
+    /// groups or bug access lists exactly as you would a username.
+    pub identity: String,
+    pub token: String,
+}
+
+/// `POST /api/auth/bots` — mint a **bot token**, a separate account identity.
+///
+/// Unlike an API token this does not act as the caller: it has its own ACL name, must be
+/// granted access explicitly (it does not inherit `PUBLIC`), and can never exceed the
+/// permissions of the account that created it.
+pub async fn create_bot_token(
+    State(state): State<Arc<AppState>>,
+    user: RequestUser,
+    Json(_payload): Json<CreateTokenRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    if user.via_long_lived_token {
         return Err(StatusCode::FORBIDDEN);
     }
 
     // Names are generated, not chosen. Retry on the (unlikely) chance of a collision —
-    // an ACL entry has to refer to exactly one token.
+    // an ACL entry has to refer to exactly one bot.
     let mut identity = String::new();
     let mut found = false;
     for _ in 0..8 {
@@ -384,8 +432,7 @@ pub async fn create_personal_token(
     }
     if !found {
         // Only reachable when the generator keeps producing a taken name — in practice
-        // that means MD_BUG_BOT_SUFFIX pins it and a token already holds it. A conflict
-        // is the honest answer; a 500 would suggest a server fault.
+        // that means MD_BUG_BOT_SUFFIX pins it and a bot already holds it.
         return Err(StatusCode::CONFLICT);
     }
 
@@ -394,7 +441,7 @@ pub async fn create_personal_token(
         .issue_token(
             &user.username,
             user.uid,
-            TokenKind::Personal,
+            TokenKind::Bot,
             Some(identity.clone()),
             Some(identity.clone()),
             None,
@@ -404,9 +451,8 @@ pub async fn create_personal_token(
 
     Ok((
         StatusCode::CREATED,
-        Json(CreateTokenResponse {
+        Json(CreateBotTokenResponse {
             id: token.stored.id,
-            label: identity.clone(),
             identity,
             token: token.plaintext,
         }),
@@ -417,23 +463,13 @@ pub async fn create_personal_token(
 pub struct TokenSummary {
     pub id: u64,
     pub label: Option<String>,
-    /// The ACL name, so the UI can show what to paste into a component or bug.
+    /// Present only for bots; an API token has no ACL name.
     pub identity: Option<String>,
     pub created_at: u64,
 }
 
-/// `GET /api/auth/tokens` — list the caller's personal tokens, without their secrets.
-pub async fn list_personal_tokens(
-    State(state): State<Arc<AppState>>,
-    user: RequestUser,
-) -> Result<impl IntoResponse, StatusCode> {
-    let tokens = state
-        .users
-        .list_tokens(&user.owner_username, TokenKind::Personal)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let summaries: Vec<TokenSummary> = tokens
+fn summarise(tokens: Vec<crate::auth::StoredToken>) -> Vec<TokenSummary> {
+    tokens
         .into_iter()
         .map(|t| TokenSummary {
             id: t.id,
@@ -441,23 +477,48 @@ pub async fn list_personal_tokens(
             identity: t.identity,
             created_at: t.created_at,
         })
-        .collect();
-
-    Ok(Json(summaries))
+        .collect()
 }
 
-/// `DELETE /api/auth/tokens/:id` — revoke one of the caller's personal tokens.
-///
-/// Ownership is checked before deletion, otherwise any authenticated user could revoke
-/// anyone else's tokens by guessing ids.
-pub async fn revoke_personal_token(
+/// `GET /api/auth/tokens` — the caller's API tokens, without their secrets.
+pub async fn list_api_tokens(
     State(state): State<Arc<AppState>>,
     user: RequestUser,
-    Path(id): Path<u64>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let tokens = state
         .users
-        .list_tokens(&user.owner_username, TokenKind::Personal)
+        .list_tokens(&user.owner_username, TokenKind::Api)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(summarise(tokens)))
+}
+
+/// `GET /api/auth/bots` — the caller's bot accounts.
+pub async fn list_bot_tokens(
+    State(state): State<Arc<AppState>>,
+    user: RequestUser,
+) -> Result<impl IntoResponse, StatusCode> {
+    let tokens = state
+        .users
+        .list_tokens(&user.owner_username, TokenKind::Bot)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(summarise(tokens)))
+}
+
+/// Revokes one of the caller's tokens of the given kind.
+///
+/// Ownership is checked before deletion; otherwise any authenticated user could revoke
+/// anyone else's tokens by guessing ids.
+async fn revoke_owned_token(
+    state: &Arc<AppState>,
+    user: &RequestUser,
+    kind: TokenKind,
+    id: u64,
+) -> Result<StatusCode, StatusCode> {
+    let tokens = state
+        .users
+        .list_tokens(&user.owner_username, kind)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -472,4 +533,22 @@ pub async fn revoke_personal_token(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// `DELETE /api/auth/tokens/:id`
+pub async fn revoke_api_token(
+    State(state): State<Arc<AppState>>,
+    user: RequestUser,
+    Path(id): Path<u64>,
+) -> Result<impl IntoResponse, StatusCode> {
+    revoke_owned_token(&state, &user, TokenKind::Api, id).await
+}
+
+/// `DELETE /api/auth/bots/:id`
+pub async fn revoke_bot_token(
+    State(state): State<Arc<AppState>>,
+    user: RequestUser,
+    Path(id): Path<u64>,
+) -> Result<impl IntoResponse, StatusCode> {
+    revoke_owned_token(&state, &user, TokenKind::Bot, id).await
 }

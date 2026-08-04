@@ -199,11 +199,19 @@ async fn main() -> anyhow::Result<()> {
         )
         .route(
             "/api/auth/tokens",
-            post(api_auth::create_personal_token).get(api_auth::list_personal_tokens),
+            post(api_auth::create_api_token).get(api_auth::list_api_tokens),
         )
         .route(
             "/api/auth/tokens/:id",
-            axum::routing::delete(api_auth::revoke_personal_token),
+            axum::routing::delete(api_auth::revoke_api_token),
+        )
+        .route(
+            "/api/auth/bots",
+            post(api_auth::create_bot_token).get(api_auth::list_bot_tokens),
+        )
+        .route(
+            "/api/auth/bots/:id",
+            axum::routing::delete(api_auth::revoke_bot_token),
         )
         .route("/api/bug_list", get(api::get_bug_list))
         .route("/api/create_bug", post(api::create_bug))

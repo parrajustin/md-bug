@@ -31,13 +31,21 @@ use sha2::{Digest, Sha256};
 pub const ACCESS_TOKEN_TTL_SECS: u64 = 60 * 60 * 12;
 pub const REFRESH_TOKEN_TTL_SECS: u64 = 60 * 60 * 24 * 30;
 
-/// What a token authorizes. Personal access tokens are the "create one once you're
-/// logged in" case: they act as the issuing user and carry that user's permissions.
+/// What a token authorizes.
+///
+/// `Api` and `Bot` are deliberately different things and are easy to confuse:
+///
+/// - **`Api`** is *your own* credential. It authenticates as you, with your permissions,
+///   so a script using one can do exactly what you can. It has no separate ACL identity.
+/// - **`Bot`** is a *separate account*. It has its own identity that goes into component
+///   groups and bug access lists, and is capped at whatever its creator can do — so it
+///   can be given less than you have, never more.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TokenKind {
     Access,
     Refresh,
-    Personal,
+    Api,
+    Bot,
 }
 
 impl TokenKind {
@@ -45,7 +53,8 @@ impl TokenKind {
         match self {
             TokenKind::Access => "at",
             TokenKind::Refresh => "rt",
-            TokenKind::Personal => "pat",
+            TokenKind::Api => "api",
+            TokenKind::Bot => "bot",
         }
     }
 
@@ -53,10 +62,31 @@ impl TokenKind {
         match prefix {
             "at" => Some(TokenKind::Access),
             "rt" => Some(TokenKind::Refresh),
-            "pat" => Some(TokenKind::Personal),
+            "api" => Some(TokenKind::Api),
+            "bot" => Some(TokenKind::Bot),
             _ => None,
         }
     }
+
+    /// True for the long-lived credentials a user creates and stores somewhere, as
+    /// opposed to a session token obtained by logging in.
+    pub fn is_long_lived(&self) -> bool {
+        matches!(self, TokenKind::Api | TokenKind::Bot)
+    }
+}
+
+/// A readable three-word label for an API token, so a user can tell theirs apart.
+///
+/// Unlike a bot identity this is only a label — it never appears in an ACL — so it
+/// carries no owner prefix.
+pub fn generate_token_label() -> String {
+    let mut bytes = [0u8; 3];
+    OsRng.fill_bytes(&mut bytes);
+    let words: Vec<&str> = bytes
+        .iter()
+        .map(|b| BOT_WORDS[*b as usize % BOT_WORDS.len()])
+        .collect();
+    format!("{}_{}_{}", words[0], words[1], words[2])
 }
 
 /// Separator between a bot's owner and its generated suffix, e.g.
@@ -165,14 +195,16 @@ pub struct RequestUser {
     pub owner_username: String,
     pub uid: u64,
     pub is_admin: bool,
-    /// True when authenticating with a personal access token rather than a session.
-    pub via_personal_token: bool,
+    /// True when authenticating with a long-lived API or bot token rather than a
+    /// session obtained by logging in.
+    pub via_long_lived_token: bool,
 }
 
 impl RequestUser {
-    /// True when this request is a bot acting under a personal access token.
+    /// True when this request is a bot: a separate identity, not the owner acting
+    /// through their own API token.
     pub fn is_bot(&self) -> bool {
-        self.via_personal_token && self.username != self.owner_username
+        self.via_long_lived_token && self.username != self.owner_username
     }
 }
 

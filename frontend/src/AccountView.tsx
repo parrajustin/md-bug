@@ -53,7 +53,8 @@ const AccountView: React.FC<AccountViewProps> = ({
 
   const [ownedComponents, setOwnedComponents] = useState<ComponentSummary[]>([]);
   const [myBugs, setMyBugs] = useState<BugSummary[]>([]);
-  const [tokens, setTokens] = useState<PersonalToken[]>([]);
+  const [apiTokens, setApiTokens] = useState<PersonalToken[]>([]);
+  const [botTokens, setBotTokens] = useState<PersonalToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,15 +66,19 @@ const AccountView: React.FC<AccountViewProps> = ({
 
   const [creating, setCreating] = useState(false);
   /// The plaintext token, shown once. The server never reveals it again.
-  const [revealed, setRevealed] = useState<{ identity: string; token: string } | null>(
-    null
-  );
+  const [revealed, setRevealed] = useState<{
+    kind: 'api' | 'bot';
+    name: string;
+    token: string;
+  } | null>(null);
 
   const loadTokens = useCallback(async () => {
     const session = getActiveSession();
     if (!session) return;
-    const result = await authApi.listPersonalTokens(session.accessToken);
-    if (result.ok) setTokens(result.val);
+    const api = await authApi.listApiTokens(session.accessToken);
+    if (api.ok) setApiTokens(api.val);
+    const bots = await authApi.listBotTokens(session.accessToken);
+    if (bots.ok) setBotTokens(bots.val);
   }, []);
 
   useEffect(() => {
@@ -136,27 +141,57 @@ const AccountView: React.FC<AccountViewProps> = ({
     onPasswordChanged();
   };
 
-  const handleCreateToken = async () => {
+  const handleCreateApiToken = async () => {
     const session = getActiveSession();
     if (!session) return;
 
     setCreating(true);
     setError(null);
-    const result = await authApi.createPersonalToken(session.accessToken);
+    const result = await authApi.createApiToken(session.accessToken);
     setCreating(false);
 
     if (result.err) {
       setError(result.val.message);
       return;
     }
-    setRevealed(result.safeUnwrap());
+    const { label, token } = result.safeUnwrap();
+    setRevealed({ kind: 'api', name: label, token });
     await loadTokens();
   };
 
-  const handleRevoke = async (id: number) => {
+  const handleCreateBotToken = async () => {
     const session = getActiveSession();
     if (!session) return;
-    const result = await authApi.revokePersonalToken(session.accessToken, id);
+
+    setCreating(true);
+    setError(null);
+    const result = await authApi.createBotToken(session.accessToken);
+    setCreating(false);
+
+    if (result.err) {
+      setError(result.val.message);
+      return;
+    }
+    const { identity, token } = result.safeUnwrap();
+    setRevealed({ kind: 'bot', name: identity, token });
+    await loadTokens();
+  };
+
+  const handleRevokeApi = async (id: number) => {
+    const session = getActiveSession();
+    if (!session) return;
+    const result = await authApi.revokeApiToken(session.accessToken, id);
+    if (result.err) {
+      setError(result.val.message);
+      return;
+    }
+    await loadTokens();
+  };
+
+  const handleRevokeBot = async (id: number) => {
+    const session = getActiveSession();
+    if (!session) return;
+    const result = await authApi.revokeBotToken(session.accessToken, id);
     if (result.err) {
       setError(result.val.message);
       return;
@@ -306,45 +341,98 @@ const AccountView: React.FC<AccountViewProps> = ({
 
         <Card variant="outlined">
           <CardHeader
-            title="Bot access tokens"
+            title="API tokens"
             slotProps={{ title: { variant: 'h6', sx: { fontWeight: 'bold' } } }}
           />
           <Divider />
           <CardContent>
             <Typography color="text.secondary" variant="body2" sx={{ mb: 2 }}>
-              Each token is its own identity, named automatically. Add that name to a
-              component group or a bug&apos;s access list exactly as you would a username.
-              A token can be granted <strong>less</strong> than you have, never more — and
-              loses access automatically if you do. Bots do <strong>not</strong> inherit
-              <code> PUBLIC</code> access; they must be added explicitly.
+              An API token is <strong>your own</strong> credential for calling the API
+              from a script. It acts as you and carries exactly your permissions, so it
+              needs no separate grants.
             </Typography>
 
             <Box sx={{ mb: 2 }}>
               <Button
                 variant="contained"
-                onClick={handleCreateToken}
+                onClick={handleCreateApiToken}
                 disabled={creating}
-                data-testid="create-token"
+                data-testid="create-api-token"
               >
-                {creating ? 'Creating…' : 'Create token'}
+                {creating ? 'Creating…' : 'Create API token'}
               </Button>
             </Box>
 
-            {tokens.length === 0 ? (
-              <Typography color="text.secondary" data-testid="no-tokens">
-                You have no bot tokens.
+            {apiTokens.length === 0 ? (
+              <Typography color="text.secondary" data-testid="no-api-tokens">
+                You have no API tokens.
               </Typography>
             ) : (
-              <List dense disablePadding data-testid="token-list">
-                {tokens.map((t) => (
+              <List dense disablePadding data-testid="api-token-list">
+                {apiTokens.map((t) => (
                   <ListItem
                     key={t.id}
                     secondaryAction={
                       <Tooltip title="Revoke">
                         <IconButton
                           edge="end"
-                          onClick={() => handleRevoke(t.id)}
-                          data-testid={`revoke-${t.id}`}
+                          onClick={() => handleRevokeApi(t.id)}
+                          data-testid={`revoke-api-${t.id}`}
+                        >
+                          <DeleteIcon />
+                        </IconButton>
+                      </Tooltip>
+                    }
+                  >
+                    <ListItemText primary={t.label ?? `Token ${t.id}`} secondary="Acts as you" />
+                  </ListItem>
+                ))}
+              </List>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card variant="outlined">
+          <CardHeader
+            title="Bot accounts"
+            slotProps={{ title: { variant: 'h6', sx: { fontWeight: 'bold' } } }}
+          />
+          <Divider />
+          <CardContent>
+            <Typography color="text.secondary" variant="body2" sx={{ mb: 2 }}>
+              A bot is a <strong>separate account</strong>, not you. Add its name to a
+              component group or a bug&apos;s access list exactly as you would a
+              username. It can be granted <strong>less</strong> than you have, never more,
+              and does <strong>not</strong> inherit <code>PUBLIC</code> access — it must be
+              added explicitly.
+            </Typography>
+
+            <Box sx={{ mb: 2 }}>
+              <Button
+                variant="contained"
+                onClick={handleCreateBotToken}
+                disabled={creating}
+                data-testid="create-bot-token"
+              >
+                {creating ? 'Creating…' : 'Create bot account'}
+              </Button>
+            </Box>
+
+            {botTokens.length === 0 ? (
+              <Typography color="text.secondary" data-testid="no-bot-tokens">
+                You have no bot accounts.
+              </Typography>
+            ) : (
+              <List dense disablePadding data-testid="bot-token-list">
+                {botTokens.map((t) => (
+                  <ListItem
+                    key={t.id}
+                    secondaryAction={
+                      <Tooltip title="Revoke">
+                        <IconButton
+                          edge="end"
+                          onClick={() => handleRevokeBot(t.id)}
+                          data-testid={`revoke-bot-${t.id}`}
                         >
                           <DeleteIcon />
                         </IconButton>
@@ -352,8 +440,8 @@ const AccountView: React.FC<AccountViewProps> = ({
                     }
                   >
                     <ListItemText
-                      primary={t.identity ?? t.label ?? `Token ${t.id}`}
-                      secondary={t.identity ? t.label : 'Legacy token — acts as you'}
+                      primary={t.identity ?? t.label ?? `Bot ${t.id}`}
+                      secondary="Separate identity — add to components and bugs"
                     />
                   </ListItem>
                 ))}
@@ -365,18 +453,22 @@ const AccountView: React.FC<AccountViewProps> = ({
 
       {/* Shown once: the server stores only a hash and can never display it again. */}
       <Dialog open={revealed !== null} onClose={() => setRevealed(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>Copy your token now</DialogTitle>
+        <DialogTitle>
+          {revealed?.kind === 'bot' ? 'Copy your bot token now' : 'Copy your API token now'}
+        </DialogTitle>
         <DialogContent>
           <Alert severity="warning" sx={{ mb: 2 }}>
             This is the only time it will be shown. If you lose it, revoke it and make a
             new one.
           </Alert>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Identity (add this to components and bugs):
+            {revealed?.kind === 'bot'
+              ? 'Identity (add this to components and bugs):'
+              : 'Name:'}
           </Typography>
           <TextField
             fullWidth
-            value={revealed?.identity ?? ''}
+            value={revealed?.name ?? ''}
             sx={{ mb: 2 }}
             slotProps={{
               htmlInput: { readOnly: true, 'data-testid': 'revealed-identity' },

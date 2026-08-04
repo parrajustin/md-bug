@@ -401,7 +401,46 @@ async function main() {
       .then((b) => b.access_token);
 
     // ---- Step 16: creating a bot token reveals it once --------------------------
-    await page.click('[data-testid="create-token"]');
+    // First an API token: the user's own credential, which acts as them.
+    await page.click('[data-testid="create-api-token"]');
+    await page.waitForSelector('[data-testid="revealed-token"]');
+    const userApiToken = await page.$eval(
+      '[data-testid="revealed-token"]',
+      (el) => el.value
+    );
+    if (!userApiToken.startsWith('mdb_api_')) {
+      throw new Error(`expected an API token, got ${userApiToken.slice(0, 12)}`);
+    }
+    await page.click('[data-testid="dismiss-token"]');
+    // The closing dialog's fields linger in the DOM; without waiting for them to go, the
+    // next waitForSelector matches the stale one and reads an empty value.
+    await page.waitForFunction(
+      () => !document.querySelector('[data-testid="revealed-token"]')
+    );
+
+    // An API token is the caller, so it sees exactly what they see.
+    const asUser = await (
+      await api(`${base}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${userApiToken}` },
+      })
+    ).json();
+    if (asUser.username !== 'admin' || asUser.is_bot !== false) {
+      throw new Error(`API token should act as admin, got ${JSON.stringify(asUser)}`);
+    }
+    const userVisible = await (
+      await api(`${base}/api/component_list`, {
+        headers: { Authorization: `Bearer ${userApiToken}` },
+      })
+    ).json();
+    if (userVisible.length === 0) {
+      throw new Error('an API token should see what its owner sees');
+    }
+    log(
+      `behaviour       API token acts as admin and sees ${userVisible.length} component(s)`
+    );
+
+    // Now a bot: a separate account that starts with nothing.
+    await page.click('[data-testid="create-bot-token"]');
     await page.waitForSelector('[data-testid="revealed-token"]');
     const botToken = await page.$eval('[data-testid="revealed-token"]', (el) => el.value);
     const botIdentity = await page.$eval(
@@ -420,11 +459,11 @@ async function main() {
     });
     // The list refreshes behind the dialog once the create resolves; wait for it so the
     // capture is not racing that render.
-    await page.waitForSelector('[data-testid="token-list"]');
+    await page.waitForSelector('[data-testid="bot-token-list"]');
     await capture(page, 'token-revealed');
 
     await page.click('[data-testid="dismiss-token"]');
-    await page.waitForSelector('[data-testid="token-list"]');
+    await page.waitForSelector('[data-testid="bot-token-list"]');
     await capture(page, 'account-with-token');
 
     // ---- Behaviour: the bot is a distinct identity, capped at its owner ---------

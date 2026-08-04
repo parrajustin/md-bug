@@ -30,8 +30,8 @@ interface LoginResponseBody {
 export interface PersonalToken {
   id: number;
   label: string | null;
-  /// The ACL name, e.g. `bot:ci-agent`. Null for tokens issued before identities
-  /// existed, which act as their owner instead.
+  /// The ACL name for a bot, e.g. `admin--long_cat_fat`. Null for API tokens, which
+  /// have no separate identity because they act as the user.
   identity: string | null;
   created_at: number;
 }
@@ -178,7 +178,7 @@ export class AuthApi {
     return Ok(undefined);
   }
 
-  async listPersonalTokens(accessToken: string): Promise<Result<PersonalToken[], StatusError>> {
+  async listApiTokens(accessToken: string): Promise<Result<PersonalToken[], StatusError>> {
     const response = await WrapPromise(
       fetch(`${this.baseUrl}/api/auth/tokens`, {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -195,14 +195,14 @@ export class AuthApi {
     return Ok(parsed.safeUnwrap() as PersonalToken[]);
   }
 
-  /// Creates a bot token. The name is generated server-side as
-  /// `<username>--<word>_<word>_<word>`, so there is nothing to pass.
+  /// Creates an **API token**: the caller's own credential, carrying their permissions.
+  /// It has no separate ACL identity — see `createBotToken` for that.
   ///
-  /// Returns the identity and the plaintext token. This is the only time the server will
-  /// ever reveal the secret.
-  async createPersonalToken(
+  /// Returns the generated label and the plaintext token. This is the only time the
+  /// server will ever reveal the secret.
+  async createApiToken(
     accessToken: string
-  ): Promise<Result<{ identity: string; token: string }, StatusError>> {
+  ): Promise<Result<{ label: string; token: string }, StatusError>> {
     const response = await this.postJson('/api/auth/tokens', {}, accessToken);
     if (response.err) return response;
 
@@ -211,11 +211,60 @@ export class AuthApi {
 
     const parsed = await WrapPromise(resp.json(), 'Malformed token response');
     if (parsed.err) return parsed;
+    const body = parsed.safeUnwrap() as { label: string; token: string };
+    return Ok({ label: body.label, token: body.token });
+  }
+
+  /// Creates a **bot token**: a separate account with its own ACL identity, capped at
+  /// the creator's permissions and excluded from `PUBLIC`.
+  async createBotToken(
+    accessToken: string
+  ): Promise<Result<{ identity: string; token: string }, StatusError>> {
+    const response = await this.postJson('/api/auth/bots', {}, accessToken);
+    if (response.err) return response;
+
+    const resp = response.safeUnwrap();
+    if (!resp.ok) return Err(errorForStatus(resp.status, 'Could not create bot'));
+
+    const parsed = await WrapPromise(resp.json(), 'Malformed bot response');
+    if (parsed.err) return parsed;
     const body = parsed.safeUnwrap() as { identity: string; token: string };
     return Ok({ identity: body.identity, token: body.token });
   }
 
-  async revokePersonalToken(
+  async listBotTokens(accessToken: string): Promise<Result<PersonalToken[], StatusError>> {
+    const response = await WrapPromise(
+      fetch(`${this.baseUrl}/api/auth/bots`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }),
+      'Could not list bots'
+    );
+    if (response.err) return response;
+
+    const resp = response.safeUnwrap();
+    if (!resp.ok) return Err(errorForStatus(resp.status, 'Could not list bots'));
+
+    const parsed = await WrapPromise(resp.json(), 'Malformed bot list');
+    if (parsed.err) return parsed;
+    return Ok(parsed.safeUnwrap() as PersonalToken[]);
+  }
+
+  async revokeBotToken(accessToken: string, id: number): Promise<Result<void, StatusError>> {
+    const response = await WrapPromise(
+      fetch(`${this.baseUrl}/api/auth/bots/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }),
+      'Could not revoke bot'
+    );
+    if (response.err) return response;
+
+    const resp = response.safeUnwrap();
+    if (!resp.ok) return Err(errorForStatus(resp.status, 'Could not revoke bot'));
+    return Ok(undefined);
+  }
+
+  async revokeApiToken(
     accessToken: string,
     id: number
   ): Promise<Result<void, StatusError>> {

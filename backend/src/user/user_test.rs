@@ -268,18 +268,18 @@ async fn lists_only_the_owners_personal_tokens() {
         .await
         .expect("create");
 
-    mgr.issue_token("alice", alice, TokenKind::Personal, Some("ci".into()), None, None)
+    mgr.issue_token("alice", alice, TokenKind::Bot, Some("ci".into()), None, None)
         .await
         .expect("issue");
     mgr.issue_token("alice", alice, TokenKind::Access, None, None, Some(60))
         .await
         .expect("issue");
-    mgr.issue_token("bob", bob, TokenKind::Personal, Some("bobs".into()), None, None)
+    mgr.issue_token("bob", bob, TokenKind::Bot, Some("bobs".into()), None, None)
         .await
         .expect("issue");
 
     let listed = mgr
-        .list_tokens("alice", TokenKind::Personal)
+        .list_tokens("alice", TokenKind::Bot)
         .await
         .expect("list");
     assert_eq!(listed.len(), 1, "only alice's personal tokens");

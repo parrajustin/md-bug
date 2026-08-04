@@ -730,7 +730,7 @@ impl RequestUser {
             username,
             uid,
             is_admin,
-            via_personal_token: false,
+            via_long_lived_token: false,
         })
     }
 
@@ -744,7 +744,7 @@ impl RequestUser {
             // accounts and mint tokens, which is not something a leaked bot key should
             // be able to do.
             is_admin: false,
-            via_personal_token: true,
+            via_long_lived_token: true,
         })
     }
 
@@ -806,20 +806,22 @@ impl axum::extract::FromRequestParts<Arc<AppState>> for RequestUser {
 
         // Access tokens are the common case; personal access tokens act as their owner
         // so agents and CLIs can call the API without an interactive login.
-        let stored = match state
-            .users
-            .verify_token(&presented, crate::auth::TokenKind::Access)
-            .await
-        {
-            Some(stored) => stored,
-            None => state
-                .users
-                .verify_token(&presented, crate::auth::TokenKind::Personal)
-                .await
-                .ok_or((StatusCode::UNAUTHORIZED, "Invalid or expired token"))?,
-        };
+        // Sessions are the common case; API and bot tokens let scripts and automation
+        // call the same endpoints without an interactive login.
+        let mut stored = None;
+        for kind in [
+            crate::auth::TokenKind::Access,
+            crate::auth::TokenKind::Api,
+            crate::auth::TokenKind::Bot,
+        ] {
+            if let Some(found) = state.users.verify_token(&presented, kind).await {
+                stored = Some(found);
+                break;
+            }
+        }
+        let stored = stored.ok_or((StatusCode::UNAUTHORIZED, "Invalid or expired token"))?;
 
-        let via_personal_token = stored.kind == crate::auth::TokenKind::Personal;
+        let via_long_lived_token = stored.kind.is_long_lived();
 
         // A personal token acts as its own `bot:` identity when it has one. Tokens
         // issued before identities existed fall back to acting as their owner.
@@ -842,7 +844,7 @@ impl axum::extract::FromRequestParts<Arc<AppState>> for RequestUser {
             return Err((StatusCode::FORBIDDEN, "Password change required"));
         }
 
-        let is_bot = via_personal_token && acting_identity != user.username;
+        let is_bot = via_long_lived_token && acting_identity != user.username;
 
         Ok(RequestUser(crate::auth::RequestUser {
             username: acting_identity,
@@ -851,7 +853,7 @@ impl axum::extract::FromRequestParts<Arc<AppState>> for RequestUser {
             // Bots are never admins regardless of their owner: admin rights create
             // accounts and mint tokens, which a leaked bot key must not be able to do.
             is_admin: user.is_admin && !is_bot,
-            via_personal_token,
+            via_long_lived_token,
         }))
     }
 }

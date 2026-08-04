@@ -25,7 +25,8 @@ describe('AccountView', () => {
     useStubApi();
     setActiveSession(testSession);
     jest.restoreAllMocks();
-    jest.spyOn(authApi, 'listPersonalTokens').mockResolvedValue(Ok([]));
+    jest.spyOn(authApi, 'listApiTokens').mockResolvedValue(Ok([]));
+    jest.spyOn(authApi, 'listBotTokens').mockResolvedValue(Ok([]));
   });
 
   it('shows only components the user created', async () => {
@@ -70,27 +71,28 @@ describe('AccountView', () => {
 
     expect(screen.getByTestId('no-components')).toBeInTheDocument();
     expect(screen.getByTestId('no-bugs')).toBeInTheDocument();
-    expect(screen.getByTestId('no-tokens')).toBeInTheDocument();
+    expect(screen.getByTestId('no-api-tokens')).toBeInTheDocument();
+    expect(screen.getByTestId('no-bot-tokens')).toBeInTheDocument();
   });
 
-  it('lists tokens by their bot identity, which is what goes in an ACL', async () => {
-    jest.spyOn(authApi, 'listPersonalTokens').mockResolvedValue(Ok([tokenFixture]));
+  it('lists bots by their identity, which is what goes in an ACL', async () => {
+    jest.spyOn(authApi, 'listBotTokens').mockResolvedValue(Ok([tokenFixture]));
     await renderWithProvidersAsync(
       <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
     );
 
-    expect(screen.getByTestId('token-list')).toHaveTextContent('test_user--long_cat_fat');
+    expect(screen.getByTestId('bot-token-list')).toHaveTextContent('test_user--long_cat_fat');
   });
 
-  it('reveals a new token and its generated identity exactly once', async () => {
-    const createPersonalToken = jest.spyOn(authApi, 'createPersonalToken').mockResolvedValue(
-      Ok({ identity: 'test_user--long_cat_fat', token: 'mdb_pat_3.super-secret-value' })
+  it('reveals a new bot token and its generated identity exactly once', async () => {
+    const createPersonalToken = jest.spyOn(authApi, 'createBotToken').mockResolvedValue(
+      Ok({ identity: 'test_user--long_cat_fat', token: 'mdb_bot_3.super-secret-value' })
     );
     await renderWithProvidersAsync(
       <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
     );
 
-    await userEvent.click(screen.getByTestId('create-token'));
+    await userEvent.click(screen.getByTestId('create-bot-token'));
 
     // The name is generated server-side, so the client sends nothing.
     await waitFor(() =>
@@ -100,7 +102,7 @@ describe('AccountView', () => {
       'test_user--long_cat_fat'
     );
     expect(screen.getByTestId('revealed-token')).toHaveValue(
-      'mdb_pat_3.super-secret-value'
+      'mdb_bot_3.super-secret-value'
     );
 
     // Dismissing must not leave the secret on screen — it is unrecoverable afterwards.
@@ -110,26 +112,59 @@ describe('AccountView', () => {
     );
   });
 
+  it('creates an API token that acts as the user, with no ACL identity', async () => {
+    const createApiToken = jest
+      .spyOn(authApi, 'createApiToken')
+      .mockResolvedValue(Ok({ label: 'long_cat_fat', token: 'mdb_api_4.secret' }));
+    await renderWithProvidersAsync(
+      <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
+    );
+
+    await userEvent.click(screen.getByTestId('create-api-token'));
+
+    await waitFor(() =>
+      expect(createApiToken).toHaveBeenCalledWith(testSession.accessToken)
+    );
+    // An API token is the user, so what is shown is a label, not an ACL identity.
+    expect(await screen.findByTestId('revealed-identity')).toHaveValue('long_cat_fat');
+    expect(screen.getByTestId('revealed-token')).toHaveValue('mdb_api_4.secret');
+  });
+
+  it('keeps API tokens and bot accounts in separate lists', async () => {
+    jest.spyOn(authApi, 'listApiTokens').mockResolvedValue(
+      Ok([{ id: 1, label: 'long_cat_fat', identity: null, created_at: 0 }])
+    );
+    jest.spyOn(authApi, 'listBotTokens').mockResolvedValue(Ok([tokenFixture]));
+    await renderWithProvidersAsync(
+      <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
+    );
+
+    expect(screen.getByTestId('api-token-list')).toHaveTextContent('long_cat_fat');
+    expect(screen.getByTestId('api-token-list')).not.toHaveTextContent('test_user--');
+    expect(screen.getByTestId('bot-token-list')).toHaveTextContent('test_user--long_cat_fat');
+  });
+
   it('needs no input to create a token', async () => {
     await renderWithProvidersAsync(
       <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
     );
 
     // Names are generated, so there is nothing to type and nothing to validate.
-    expect(screen.getByTestId('create-token')).toBeEnabled();
+    expect(screen.getByTestId('create-api-token')).toBeEnabled();
+    expect(screen.getByTestId('create-bot-token')).toBeEnabled();
     expect(screen.queryByTestId('token-label')).not.toBeInTheDocument();
   });
 
-  it('revokes a token and refreshes the list', async () => {
-    jest.spyOn(authApi, 'listPersonalTokens').mockResolvedValue(Ok([tokenFixture]));
+  it('revokes a bot and refreshes the list', async () => {
+    jest.spyOn(authApi, 'listBotTokens').mockResolvedValue(Ok([tokenFixture]));
     const revoke = jest
-      .spyOn(authApi, 'revokePersonalToken')
+      .spyOn(authApi, 'revokeBotToken')
       .mockResolvedValue(Ok(undefined));
     await renderWithProvidersAsync(
       <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
     );
 
-    await userEvent.click(screen.getByTestId(`revoke-${tokenFixture.id}`));
+    await userEvent.click(screen.getByTestId(`revoke-bot-${tokenFixture.id}`));
 
     await waitFor(() =>
       expect(revoke).toHaveBeenCalledWith(testSession.accessToken, tokenFixture.id)
@@ -138,13 +173,13 @@ describe('AccountView', () => {
 
   it('surfaces a server rejection when creating a token', async () => {
     jest
-      .spyOn(authApi, 'createPersonalToken')
+      .spyOn(authApi, 'createBotToken')
       .mockResolvedValue(Err(PermissionDeniedError('Not permitted')));
     await renderWithProvidersAsync(
       <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
     );
 
-    await userEvent.click(screen.getByTestId('create-token'));
+    await userEvent.click(screen.getByTestId('create-bot-token'));
 
     expect(await screen.findByTestId('account-error')).toHaveTextContent(/not permitted/i);
   });
