@@ -8,6 +8,10 @@
  */
 module.exports = {
   testEnvironment: 'jsdom',
+  // jest's 5s default is marginal for these: userEvent types character by character and
+  // each keystroke re-renders a MUI form, so a loaded machine tips them over. The tests
+  // themselves take well under a second when the box is idle.
+  testTimeout: 20_000,
   roots: ['<rootDir>/src'],
   testMatch: ['**/*.test.ts', '**/*.test.tsx'],
   setupFilesAfterEnv: ['<rootDir>/src/test/setup.ts'],
