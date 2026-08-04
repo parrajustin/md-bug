@@ -1,7 +1,7 @@
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Ok, Err } from 'standard-ts-lib/src/result';
-import { PermissionDeniedError } from 'standard-ts-lib/src/status_error';
+import { PermissionDeniedError, UnauthenticatedError } from 'standard-ts-lib/src/status_error';
 import AccountView from './AccountView';
 import { authApi, setActiveSession } from './api/auth_api';
 import {
@@ -38,7 +38,9 @@ describe('AccountView', () => {
           { ...testComponents[1], creator: 'someone_else' },
         ]),
     });
-    await renderWithProvidersAsync(<AccountView username={TEST_USER} isAdmin={false} />);
+    await renderWithProvidersAsync(
+      <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
+    );
 
     expect(screen.getByTestId('owned-components')).toHaveTextContent(testComponents[0].name);
     expect(screen.getByTestId('owned-components')).not.toHaveTextContent(
@@ -49,7 +51,9 @@ describe('AccountView', () => {
   it('queries bugs with involves: so every participant field is covered', async () => {
     const get_bug_list = jest.fn().mockResolvedValue(Ok([testBugSummary]));
     useStubApi({ get_bug_list });
-    await renderWithProvidersAsync(<AccountView username={TEST_USER} isAdmin={false} />);
+    await renderWithProvidersAsync(
+      <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
+    );
 
     expect(get_bug_list).toHaveBeenCalledWith(`involves:${TEST_USER}`);
     expect(screen.getByTestId('my-bugs')).toHaveTextContent(testBugSummary.title);
@@ -60,7 +64,9 @@ describe('AccountView', () => {
       get_component_list: async () => Ok([]),
       get_bug_list: async () => Ok([]),
     });
-    await renderWithProvidersAsync(<AccountView username={TEST_USER} isAdmin={false} />);
+    await renderWithProvidersAsync(
+      <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
+    );
 
     expect(screen.getByTestId('no-components')).toBeInTheDocument();
     expect(screen.getByTestId('no-bugs')).toBeInTheDocument();
@@ -69,7 +75,9 @@ describe('AccountView', () => {
 
   it('lists tokens by their bot identity, which is what goes in an ACL', async () => {
     jest.spyOn(authApi, 'listPersonalTokens').mockResolvedValue(Ok([tokenFixture]));
-    await renderWithProvidersAsync(<AccountView username={TEST_USER} isAdmin={false} />);
+    await renderWithProvidersAsync(
+      <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
+    );
 
     expect(screen.getByTestId('token-list')).toHaveTextContent('test_user--long_cat_fat');
   });
@@ -78,7 +86,9 @@ describe('AccountView', () => {
     const createPersonalToken = jest.spyOn(authApi, 'createPersonalToken').mockResolvedValue(
       Ok({ identity: 'test_user--long_cat_fat', token: 'mdb_pat_3.super-secret-value' })
     );
-    await renderWithProvidersAsync(<AccountView username={TEST_USER} isAdmin={false} />);
+    await renderWithProvidersAsync(
+      <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
+    );
 
     await userEvent.click(screen.getByTestId('create-token'));
 
@@ -101,7 +111,9 @@ describe('AccountView', () => {
   });
 
   it('needs no input to create a token', async () => {
-    await renderWithProvidersAsync(<AccountView username={TEST_USER} isAdmin={false} />);
+    await renderWithProvidersAsync(
+      <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
+    );
 
     // Names are generated, so there is nothing to type and nothing to validate.
     expect(screen.getByTestId('create-token')).toBeEnabled();
@@ -113,7 +125,9 @@ describe('AccountView', () => {
     const revoke = jest
       .spyOn(authApi, 'revokePersonalToken')
       .mockResolvedValue(Ok(undefined));
-    await renderWithProvidersAsync(<AccountView username={TEST_USER} isAdmin={false} />);
+    await renderWithProvidersAsync(
+      <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
+    );
 
     await userEvent.click(screen.getByTestId(`revoke-${tokenFixture.id}`));
 
@@ -126,15 +140,119 @@ describe('AccountView', () => {
     jest
       .spyOn(authApi, 'createPersonalToken')
       .mockResolvedValue(Err(PermissionDeniedError('Not permitted')));
-    await renderWithProvidersAsync(<AccountView username={TEST_USER} isAdmin={false} />);
+    await renderWithProvidersAsync(
+      <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
+    );
 
     await userEvent.click(screen.getByTestId('create-token'));
 
     expect(await screen.findByTestId('account-error')).toHaveTextContent(/not permitted/i);
   });
 
+  describe('password card', () => {
+    const fillPassword = async (current: string, next: string, confirm: string) => {
+      await userEvent.type(screen.getByTestId('account-current-password'), current);
+      await userEvent.type(screen.getByTestId('account-new-password'), next);
+      await userEvent.type(screen.getByTestId('account-confirm-password'), confirm);
+      await userEvent.click(screen.getByTestId('change-password'));
+    };
+
+    it('renders three masked fields at the top of the page', async () => {
+      await renderWithProvidersAsync(
+        <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
+      );
+
+      for (const id of [
+        'account-current-password',
+        'account-new-password',
+        'account-confirm-password',
+      ]) {
+        expect(screen.getByTestId(id)).toHaveAttribute('type', 'password');
+      }
+    });
+
+    it('rejects a short password without calling the API', async () => {
+      const change = jest.spyOn(authApi, 'changePassword');
+      await renderWithProvidersAsync(
+        <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
+      );
+
+      await fillPassword('old-password', 'short', 'short');
+
+      expect(await screen.findByTestId('password-error')).toHaveTextContent(/at least 8/i);
+      expect(change).not.toHaveBeenCalled();
+    });
+
+    it('rejects a mismatched confirmation without calling the API', async () => {
+      const change = jest.spyOn(authApi, 'changePassword');
+      await renderWithProvidersAsync(
+        <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
+      );
+
+      await fillPassword('old-password', 'brand-new-password', 'brand-new-passward');
+
+      expect(await screen.findByTestId('password-error')).toHaveTextContent(/do not match/i);
+      expect(change).not.toHaveBeenCalled();
+    });
+
+    it('rejects reusing the current password', async () => {
+      const change = jest.spyOn(authApi, 'changePassword');
+      await renderWithProvidersAsync(
+        <AccountView username={TEST_USER} isAdmin={false} onPasswordChanged={() => {}} />
+      );
+
+      await fillPassword('same-password-99', 'same-password-99', 'same-password-99');
+
+      expect(await screen.findByTestId('password-error')).toHaveTextContent(/different/i);
+      expect(change).not.toHaveBeenCalled();
+    });
+
+    it('changes the password and signs the user out', async () => {
+      const change = jest
+        .spyOn(authApi, 'changePassword')
+        .mockResolvedValue(Ok(undefined));
+      const onPasswordChanged = jest.fn();
+      await renderWithProvidersAsync(
+        <AccountView
+          username={TEST_USER}
+          isAdmin={false}
+          onPasswordChanged={onPasswordChanged}
+        />
+      );
+
+      await fillPassword('old-password', 'my-new-password', 'my-new-password');
+
+      await waitFor(() =>
+        expect(change).toHaveBeenCalledWith(TEST_USER, 'old-password', 'my-new-password')
+      );
+      // The server revokes every token, so staying signed in would be a lie.
+      await waitFor(() => expect(onPasswordChanged).toHaveBeenCalled());
+    });
+
+    it('surfaces a wrong current password and stays put', async () => {
+      jest
+        .spyOn(authApi, 'changePassword')
+        .mockResolvedValue(Err(UnauthenticatedError('Incorrect username or password')));
+      const onPasswordChanged = jest.fn();
+      await renderWithProvidersAsync(
+        <AccountView
+          username={TEST_USER}
+          isAdmin={false}
+          onPasswordChanged={onPasswordChanged}
+        />
+      );
+
+      await fillPassword('wrong-current', 'my-new-password', 'my-new-password');
+
+      expect(await screen.findByTestId('password-error')).toHaveTextContent(/incorrect/i);
+      expect(onPasswordChanged).not.toHaveBeenCalled();
+    });
+  });
+
   it('marks administrators', async () => {
-    await renderWithProvidersAsync(<AccountView username={TEST_USER} isAdmin />);
+    await renderWithProvidersAsync(
+      <AccountView username={TEST_USER} isAdmin onPasswordChanged={() => {}} />
+    );
     expect(screen.getByText('Administrator')).toBeInTheDocument();
   });
 });

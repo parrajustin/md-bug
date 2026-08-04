@@ -232,7 +232,13 @@ const App: React.FC = () => {
           <Route path="/create_issue" element={<CreateIssueView username={username} />} />
           <Route path="/create_component" element={<CreateComponentView username={username} isAdmin={session.isAdmin} />} />
           <Route path="/component/:id" element={<ComponentEditorView username={username} />} />
-          <Route path="/account" element={<AccountView username={username} isAdmin={session.isAdmin} />} />
+          <Route path="/account" element={
+              <AccountView
+                username={username}
+                isAdmin={session.isAdmin}
+                onPasswordChanged={handlePasswordChanged}
+              />
+            } />
           <Route path="/login" element={<LoginView onLogin={handleLogin} />} />
         </Routes>
       </Layout>

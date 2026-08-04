@@ -27,14 +27,28 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { get_api, type BugSummary, type ComponentSummary } from './api/api';
-import { authApi, getActiveSession, type PersonalToken } from './api/auth_api';
+import {
+  authApi,
+  clearSession,
+  getActiveSession,
+  type PersonalToken,
+} from './api/auth_api';
+
+const MIN_PASSWORD_LEN = 8;
 
 interface AccountViewProps {
   username: string;
   isAdmin: boolean;
+  /// Called after a successful password change. The server revokes every token for the
+  /// account, so the current session is already dead and the user must sign in again.
+  onPasswordChanged: () => void;
 }
 
-const AccountView: React.FC<AccountViewProps> = ({ username, isAdmin }) => {
+const AccountView: React.FC<AccountViewProps> = ({
+  username,
+  isAdmin,
+  onPasswordChanged,
+}) => {
   const navigate = useNavigate();
 
   const [ownedComponents, setOwnedComponents] = useState<ComponentSummary[]>([]);
@@ -42,6 +56,12 @@ const AccountView: React.FC<AccountViewProps> = ({ username, isAdmin }) => {
   const [tokens, setTokens] = useState<PersonalToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
 
   const [creating, setCreating] = useState(false);
   /// The plaintext token, shown once. The server never reveals it again.
@@ -84,6 +104,37 @@ const AccountView: React.FC<AccountViewProps> = ({ username, isAdmin }) => {
     };
     load();
   }, [username, loadTokens]);
+
+  const handleChangePassword = async () => {
+    setPasswordError(null);
+
+    // Checked locally so the obvious mistakes cost no round trip; the server enforces
+    // the same rules regardless.
+    if (newPassword.length < MIN_PASSWORD_LEN) {
+      setPasswordError(`New password must be at least ${MIN_PASSWORD_LEN} characters`);
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('The two new passwords do not match');
+      return;
+    }
+    if (newPassword === currentPassword) {
+      setPasswordError('The new password must be different from the current one');
+      return;
+    }
+
+    setChangingPassword(true);
+    const result = await authApi.changePassword(username, currentPassword, newPassword);
+    setChangingPassword(false);
+
+    if (result.err) {
+      setPasswordError(result.val.message);
+      return;
+    }
+
+    await clearSession();
+    onPasswordChanged();
+  };
 
   const handleCreateToken = async () => {
     const session = getActiveSession();
@@ -137,6 +188,67 @@ const AccountView: React.FC<AccountViewProps> = ({ username, isAdmin }) => {
       )}
 
       <Stack spacing={3}>
+        <Card variant="outlined" data-testid="password-card">
+          <CardHeader
+            title="Password"
+            slotProps={{ title: { variant: 'h6', sx: { fontWeight: 'bold' } } }}
+          />
+          <Divider />
+          <CardContent>
+            <Typography color="text.secondary" variant="body2" sx={{ mb: 2 }}>
+              Changing your password signs you out everywhere: every token for this
+              account is revoked, so anyone holding a stolen session loses it.
+            </Typography>
+            <Stack spacing={2} sx={{ maxWidth: 420 }}>
+              <TextField
+                size="small"
+                type="password"
+                label="Current password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                autoComplete="current-password"
+                slotProps={{ htmlInput: { 'data-testid': 'account-current-password' } }}
+              />
+              <TextField
+                size="small"
+                type="password"
+                label="New password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                autoComplete="new-password"
+                helperText={`At least ${MIN_PASSWORD_LEN} characters.`}
+                slotProps={{ htmlInput: { 'data-testid': 'account-new-password' } }}
+              />
+              <TextField
+                size="small"
+                type="password"
+                label="Confirm new password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                autoComplete="new-password"
+                slotProps={{ htmlInput: { 'data-testid': 'account-confirm-password' } }}
+              />
+
+              {passwordError && (
+                <Alert severity="error" data-testid="password-error">
+                  {passwordError}
+                </Alert>
+              )}
+
+              <Box>
+                <Button
+                  variant="contained"
+                  onClick={handleChangePassword}
+                  disabled={changingPassword || !currentPassword || !newPassword}
+                  data-testid="change-password"
+                >
+                  {changingPassword ? 'Changing…' : 'Change password'}
+                </Button>
+              </Box>
+            </Stack>
+          </CardContent>
+        </Card>
+
         <Card variant="outlined">
           <CardHeader
             title="Components you own"

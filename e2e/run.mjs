@@ -351,7 +351,56 @@ async function main() {
     await page.waitForSelector('[data-testid="account-view"]');
     await capture(page, 'account-view');
 
-    // ---- Step 13: creating a bot token reveals it once --------------------------
+    // ---- Step 13: changing the password from the account page ------------------
+    const ACCOUNT_PASSWORD = 'changed-from-account-1';
+    await page.type('[data-testid="account-current-password"]', NEW_ADMIN_PASSWORD);
+    await page.type('[data-testid="account-new-password"]', 'short');
+    await page.type('[data-testid="account-confirm-password"]', 'short');
+    await page.click('[data-testid="change-password"]');
+    await page.waitForSelector('[data-testid="password-error"]');
+    await capture(page, 'account-password-validation');
+
+    for (const field of ['account-new-password', 'account-confirm-password']) {
+      await page.click(`[data-testid="${field}"]`, { clickCount: 3 });
+      await page.keyboard.press('Backspace');
+      await page.type(`[data-testid="${field}"]`, ACCOUNT_PASSWORD);
+    }
+    await page.click('[data-testid="change-password"]');
+    // The change revokes every token, so the app drops the session and returns to login.
+    await page.waitForSelector('[data-testid="login-card"]');
+    await capture(page, 'signed-out-after-password-change');
+
+    const oldPasswordResp = await api(`${base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: NEW_ADMIN_PASSWORD }),
+    });
+    if (oldPasswordResp.status !== 401) {
+      throw new Error(
+        `the previous password should be rejected, got ${oldPasswordResp.status}`
+      );
+    }
+    log('behaviour       previous password rejected after account-page change (401)');
+
+    // Sign back in with the new password and return to the account page.
+    await page.type('[data-testid="login-username"]', 'admin');
+    await page.type('[data-testid="login-password"]', ACCOUNT_PASSWORD);
+    await page.click('[data-testid="login-submit"]');
+    await page.waitForSelector('header');
+    await page.goto(`${base}/account`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('[data-testid="account-view"]');
+
+    const apiToken2 = await (
+      await api(`${base}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'admin', password: ACCOUNT_PASSWORD }),
+      })
+    )
+      .json()
+      .then((b) => b.access_token);
+
+    // ---- Step 16: creating a bot token reveals it once --------------------------
     await page.click('[data-testid="create-token"]');
     await page.waitForSelector('[data-testid="revealed-token"]');
     const botToken = await page.$eval('[data-testid="revealed-token"]', (el) => el.value);
@@ -442,7 +491,7 @@ async function main() {
     // Find it, then open its Access tab.
     const created = await (
       await api(`${base}/api/component_list`, {
-        headers: { Authorization: `Bearer ${apiToken}` },
+        headers: { Authorization: `Bearer ${apiToken2}` },
       })
     ).json();
     const target = created.find((c) => c.name === 'bot_playground');
