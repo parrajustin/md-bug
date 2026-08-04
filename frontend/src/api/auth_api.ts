@@ -27,6 +27,14 @@ interface LoginResponseBody {
   expires_in: number;
 }
 
+export interface AdminUser {
+  username: string;
+  uid: number;
+  is_admin: boolean;
+  must_change_password: boolean;
+  disabled: boolean;
+}
+
 export interface PersonalToken {
   id: number;
   label: string | null;
@@ -181,6 +189,42 @@ export class AuthApi {
     if (parsed.err) return parsed;
     const body = parsed.safeUnwrap() as { username: string; password: string };
     return Ok({ username: body.username, password: body.password });
+  }
+
+  /// Admin-only. Lists every account; password hashes are never included.
+  async listUsers(accessToken: string): Promise<Result<AdminUser[], StatusError>> {
+    const response = await WrapPromise(
+      fetch(`${this.baseUrl}/api/auth/users`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }),
+      'Could not list users'
+    );
+    if (response.err) return response;
+
+    const resp = response.safeUnwrap();
+    if (!resp.ok) return Err(errorForStatus(resp.status, 'Could not list users'));
+
+    const parsed = await WrapPromise(resp.json(), 'Malformed user list');
+    if (parsed.err) return parsed;
+    return Ok(parsed.safeUnwrap() as AdminUser[]);
+  }
+
+  /// Admin-only. Disabling blocks login and revokes the account's tokens at once.
+  async setUserDisabled(
+    accessToken: string,
+    username: string,
+    disabled: boolean
+  ): Promise<Result<void, StatusError>> {
+    const response = await this.postJson(
+      `/api/auth/users/${encodeURIComponent(username)}/disabled`,
+      { disabled },
+      accessToken
+    );
+    if (response.err) return response;
+
+    const resp = response.safeUnwrap();
+    if (!resp.ok) return Err(errorForStatus(resp.status, 'Could not update the account'));
+    return Ok(undefined);
   }
 
   async listApiTokens(accessToken: string): Promise<Result<PersonalToken[], StatusError>> {

@@ -206,6 +206,10 @@ async fn main() -> anyhow::Result<()> {
             axum::routing::delete(api_auth::revoke_api_token),
         )
         .route(
+            "/api/auth/users/:username/disabled",
+            post(api_auth::set_user_disabled),
+        )
+        .route(
             "/api/auth/bots",
             post(api_auth::create_bot_token).get(api_auth::list_bot_tokens),
         )

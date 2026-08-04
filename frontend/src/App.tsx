@@ -17,6 +17,7 @@ import { restoreSession, clearSession, getActiveSession, authApi } from './api/a
 import LoginView from './LoginView';
 import ChangePasswordView from './ChangePasswordView';
 import AccountView from './AccountView';
+import AdminView from './AdminView';
 import './styles.css';
 
 interface BugLoaderProps {
@@ -219,7 +220,8 @@ const App: React.FC = () => {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Layout 
-        username={username} 
+        username={username}
+        isAdmin={session.isAdmin}
         onSignOut={handleSignOut}
         searchValue={searchQuery}
         onSearch={handleSearch}
@@ -232,6 +234,8 @@ const App: React.FC = () => {
           <Route path="/create_issue" element={<CreateIssueView username={username} />} />
           <Route path="/create_component" element={<CreateComponentView username={username} isAdmin={session.isAdmin} />} />
           <Route path="/component/:id" element={<ComponentEditorView username={username} />} />
+          {/* Rendered only for admins; every endpoint it calls re-checks server-side. */}
+          {session.isAdmin && <Route path="/admin" element={<AdminView username={username} />} />}
           <Route path="/account" element={
               <AccountView
                 username={username}

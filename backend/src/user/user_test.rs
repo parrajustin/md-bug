@@ -409,3 +409,83 @@ async fn generated_passwords_differ_between_accounts() {
     assert!(mgr.verify_password("a", &second).await.is_err());
     assert!(mgr.verify_password("b", &first).await.is_err());
 }
+
+#[tokio::test]
+async fn disabling_an_account_revokes_its_tokens_immediately() {
+    let (mgr, _dir) = manager().await;
+    let uid = mgr
+        .create_user("alice", None, Some("pw"), false, false)
+        .await
+        .expect("create");
+
+    let session = mgr
+        .issue_token("alice", uid, TokenKind::Access, None, None, Some(3600))
+        .await
+        .expect("issue");
+    let api = mgr
+        .issue_token("alice", uid, TokenKind::Api, None, None, None)
+        .await
+        .expect("issue");
+
+    assert!(mgr.verify_token(&session.plaintext, TokenKind::Access).await.is_some());
+
+    mgr.set_disabled("alice", true).await.expect("disable");
+
+    let user = mgr
+        .get_user(UserIdentifier::Username("alice".into()))
+        .await
+        .expect("user");
+    assert!(user.disabled);
+    // Waiting for expiry would leave a disabled account working for hours.
+    assert!(
+        mgr.verify_token(&session.plaintext, TokenKind::Access).await.is_none(),
+        "disabling must kill live sessions, not just block new logins"
+    );
+    assert!(
+        mgr.verify_token(&api.plaintext, TokenKind::Api).await.is_none(),
+        "and long-lived API tokens too"
+    );
+}
+
+#[tokio::test]
+async fn disabling_leaves_other_accounts_alone() {
+    let (mgr, _dir) = manager().await;
+    let alice = mgr.create_user("alice", None, Some("pw"), false, false).await.expect("a");
+    let bob = mgr.create_user("bob", None, Some("pw"), false, false).await.expect("b");
+
+    let alice_token = mgr
+        .issue_token("alice", alice, TokenKind::Access, None, None, Some(3600))
+        .await
+        .expect("issue");
+    let bob_token = mgr
+        .issue_token("bob", bob, TokenKind::Access, None, None, Some(3600))
+        .await
+        .expect("issue");
+
+    mgr.set_disabled("alice", true).await.expect("disable");
+
+    assert!(mgr.verify_token(&alice_token.plaintext, TokenKind::Access).await.is_none());
+    assert!(mgr.verify_token(&bob_token.plaintext, TokenKind::Access).await.is_some());
+    let bob_user = mgr
+        .get_user(UserIdentifier::Username("bob".into()))
+        .await
+        .expect("user");
+    assert!(!bob_user.disabled);
+}
+
+#[tokio::test]
+async fn a_disabled_account_can_be_re_enabled() {
+    let (mgr, _dir) = manager().await;
+    mgr.create_user("alice", None, Some("pw"), false, false).await.expect("create");
+
+    mgr.set_disabled("alice", true).await.expect("disable");
+    mgr.set_disabled("alice", false).await.expect("enable");
+
+    let user = mgr
+        .get_user(UserIdentifier::Username("alice".into()))
+        .await
+        .expect("user");
+    assert!(!user.disabled);
+    // The password still works; disabling is not a password reset.
+    assert!(mgr.verify_password("alice", "pw").await.is_ok());
+}

@@ -574,6 +574,58 @@ async function main() {
     await page.click('[data-testid="login-submit"]');
     await page.waitForSelector('header');
 
+    // ---- The admin console ------------------------------------------------------
+    await page.click('[data-testid="user-menu"]');
+    await page.waitForSelector('[data-testid="menu-admin"]');
+    await page.click('[data-testid="menu-admin"]');
+    await page.waitForSelector('[data-testid="admin-view"]');
+    await page.goto(`${base}/admin`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('[data-testid="admin-view"]');
+    await capture(page, 'admin-console');
+
+    // Create an account through the UI and read the generated password from the dialog.
+    await page.type('[data-testid="new-username"]', 'contractor');
+    await page.click('[data-testid="create-user"]');
+    await page.waitForSelector('[data-testid="generated-password"]');
+    const contractorPassword = await page.$eval(
+      '[data-testid="generated-password"]',
+      (el) => el.value
+    );
+    await page.$eval('[data-testid="generated-password"]', (el) => {
+      el.value = '<generated, redacted for screenshot stability>';
+    });
+    await capture(page, 'admin-created-user');
+    await page.click('[data-testid="dismiss-password"]');
+    await page.waitForFunction(
+      () => !document.querySelector('[data-testid="generated-password"]')
+    );
+
+    // The account works (as far as its forced rotation) before being disabled.
+    const beforeDisable = await api(`${base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'contractor', password: contractorPassword }),
+    });
+    if (beforeDisable.status !== 200) {
+      throw new Error(`a new account should be able to log in, got ${beforeDisable.status}`);
+    }
+
+    await page.click('[data-testid="toggle-disabled-contractor"]');
+    await page.waitForSelector('[data-testid="user-row-contractor"] .MuiChip-colorError');
+    await capture(page, 'admin-disabled-user');
+
+    const afterDisable = await api(`${base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'contractor', password: contractorPassword }),
+    });
+    if (afterDisable.status !== 401) {
+      throw new Error(
+        `a disabled account must not log in, got ${afterDisable.status}`
+      );
+    }
+    log('behaviour       disabled account can no longer log in (401)');
+
     // ---- Steps 14-17: grant the bot access to a component it could not see ------
     //
     // This is the whole feature end to end: a bot starts with nothing (PUBLIC does not

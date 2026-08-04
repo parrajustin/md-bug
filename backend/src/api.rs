@@ -840,6 +840,10 @@ impl axum::extract::FromRequestParts<Arc<AppState>> for RequestUser {
 
         // A user under forced password rotation is locked out of everything except the
         // change-password and logout endpoints, which do not use this extractor.
+        if user.disabled {
+            return Err((StatusCode::UNAUTHORIZED, "Account is disabled"));
+        }
+
         if user.must_change_password {
             return Err((StatusCode::FORBIDDEN, "Password change required"));
         }

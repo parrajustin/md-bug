@@ -25,6 +25,10 @@ pub struct User {
     /// except changing the password and logging out.
     #[serde(default)]
     pub must_change_password: bool,
+    /// A disabled account cannot log in, and its existing tokens stop working
+    /// immediately rather than lasting until they expire.
+    #[serde(default)]
+    pub disabled: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -152,6 +156,7 @@ impl UserManager {
             password_hash,
             is_admin,
             must_change_password,
+            disabled: false,
         });
 
         db.insert("data", data).await?;
@@ -198,6 +203,31 @@ impl UserManager {
 
         db.insert("data", data).await?;
         db.write().await?;
+        Ok(())
+    }
+
+    /// Enables or disables an account. Disabling also revokes its tokens, so access ends
+    /// at once instead of whenever the current session happens to expire.
+    pub async fn set_disabled(&self, username: &str, disabled: bool) -> anyhow::Result<()> {
+        {
+            let mut db = self.db.write().await;
+            let tree = db.data().await.get("data")?;
+            let mut data = tree.into::<UserDb>()?;
+
+            let user = data
+                .users
+                .iter_mut()
+                .find(|u| u.username == username)
+                .ok_or_else(|| anyhow::anyhow!("User not found"))?;
+            user.disabled = disabled;
+
+            db.insert("data", data).await?;
+            db.write().await?;
+        }
+
+        if disabled {
+            self.revoke_tokens_for_user(username, None).await?;
+        }
         Ok(())
     }
 

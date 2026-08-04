@@ -98,13 +98,14 @@ const Main = styled('main', { shouldForwardProp: (prop) => prop !== 'open' })<{
 interface LayoutProps {
   children: React.ReactNode;
   username: string;
+  isAdmin: boolean;
   onSignOut: () => void;
   searchValue: string;
   onSearch: (value: string) => void;
   bugComponentId: number | null;
 }
 
-const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchValue, onSearch, bugComponentId }) => {
+const Layout: React.FC<LayoutProps> = ({ children, username, isAdmin, onSignOut, searchValue, onSearch, bugComponentId }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
@@ -273,6 +274,15 @@ const Layout: React.FC<LayoutProps> = ({ children, username, onSignOut, searchVa
             >
               Account
             </MenuItem>
+            {/* Only shown to admins; the endpoints behind it check server-side too. */}
+            {isAdmin && (
+              <MenuItem
+                onClick={() => { setAnchorEl(null); navigate('/admin'); }}
+                data-testid="menu-admin"
+              >
+                Administration
+              </MenuItem>
+            )}
             <MenuItem onClick={handleSignOut}>Sign out</MenuItem>
             </Menu>
           </Box>

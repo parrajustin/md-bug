@@ -58,6 +58,12 @@ pub async fn login(
         .await
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
+    // Same status as a bad password, so the endpoint cannot be used to discover which
+    // accounts exist but are disabled.
+    if user.disabled {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
     let access = state
         .users
         .issue_token(
@@ -318,6 +324,7 @@ pub struct UserSummary {
     pub uid: u64,
     pub is_admin: bool,
     pub must_change_password: bool,
+    pub disabled: bool,
 }
 
 /// `GET /api/auth/users` — admin-only listing. Password hashes are never included.
@@ -342,6 +349,7 @@ pub async fn list_users(
             uid: u.uid,
             is_admin: u.is_admin,
             must_change_password: u.must_change_password,
+            disabled: u.disabled,
         })
         .collect();
 
@@ -559,4 +567,36 @@ pub async fn revoke_bot_token(
     Path(id): Path<u64>,
 ) -> Result<impl IntoResponse, StatusCode> {
     revoke_owned_token(&state, &user, TokenKind::Bot, id).await
+}
+
+#[derive(Deserialize)]
+pub struct SetDisabledRequest {
+    pub disabled: bool,
+}
+
+/// `POST /api/auth/users/:username/disabled` — admin-only enable/disable.
+///
+/// Disabling revokes the account's tokens as well as blocking login, so access ends
+/// immediately rather than whenever the current session expires.
+pub async fn set_user_disabled(
+    State(state): State<Arc<AppState>>,
+    user: RequestUser,
+    Path(target): Path<String>,
+    Json(payload): Json<SetDisabledRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    if !user.is_admin {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    // Locking yourself out would leave nobody able to undo it.
+    if target == user.owner_username {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    state
+        .users
+        .set_disabled(&target, payload.disabled)
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
