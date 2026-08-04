@@ -876,6 +876,64 @@ async function main() {
     }
     log('behaviour       bot sees the component only after being added explicitly');
 
+    // ---- Every non-auth route rejects an anonymous caller -----------------------
+    //
+    // The route list is read out of main.rs rather than written here, so a route added
+    // later is covered automatically instead of silently skipping the check.
+    const mainRs = await readFile(join(REPO, 'backend', 'src', 'main.rs'), 'utf8');
+    const routePaths = [...mainRs.matchAll(/"(\/api\/[^"]*)"/g)].map((m) => m[1]);
+    if (routePaths.length < 20) {
+      throw new Error(`only found ${routePaths.length} routes; the parse is wrong`);
+    }
+
+    // These three must work without a token, or nobody could ever obtain one.
+    const publicRoutes = new Set([
+      '/api/auth/login',
+      '/api/auth/refresh',
+      '/api/auth/change_password',
+    ]);
+
+    let checked = 0;
+    for (const route of routePaths) {
+      if (publicRoutes.has(route)) continue;
+
+      const concrete = route.replace(':id', '1').replace(':username', 'someone');
+      let sawUnauthorized = false;
+
+      for (const method of ['GET', 'POST', 'DELETE']) {
+        const resp = await api(`${base}${concrete}`, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: method === 'GET' ? undefined : '{}',
+        });
+
+        if (resp.status >= 200 && resp.status < 300) {
+          throw new Error(
+            `${method} ${concrete} answered ${resp.status} with no token -- it is not behind the extractor`
+          );
+        }
+        if (resp.status === 401) sawUnauthorized = true;
+      }
+
+      if (!sawUnauthorized) {
+        throw new Error(
+          `${concrete} never returned 401; nothing proves it checks authentication`
+        );
+      }
+      checked += 1;
+    }
+    log(`behaviour       ${checked} non-auth routes all reject an anonymous caller (401)`);
+
+    // The same routes work with an API token, so the check above is not just a broken
+    // server refusing everything.
+    const withToken = await api(`${base}/api/component_list`, {
+      headers: { Authorization: `Bearer ${userApiToken}` },
+    });
+    if (withToken.status !== 200) {
+      throw new Error(`an API token should be accepted, got ${withToken.status}`);
+    }
+    log('behaviour       the same route succeeds with an API token');
+
     // Assert on behaviour too, not only on pixels: a screenshot cannot tell us the old
     // password stopped working.
     const stillWorks = await api(`${base}/api/auth/login`, {
