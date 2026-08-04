@@ -181,6 +181,8 @@ pub fn generate_fake_data(root: &Path) {
             user_metadata: vec![],
             created_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0),
             state_id: 1,
+        starred_by: vec![],
+        upvoted_by: vec![],
         };
 
         if let Ok(bytes) = rkyv::to_bytes::<_, 8192>(&metadata) {

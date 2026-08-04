@@ -35,7 +35,9 @@ export class FakeApi implements API {
           { version: 1, key: "Component ID", value: "192731", type: "string" }
         ],
         created_at: 1718016000000000000n,
-        state_id: 1n
+        state_id: 1n,
+        starred_by: [],
+        upvoted_by: []
       },
       comments: [
         {
@@ -80,6 +82,20 @@ export class FakeApi implements API {
   async get_bug_state(id: number): Promise<Result<BugStateResponse, StatusError>> {
     const bug = this.mockBugs.find(b => b.id === id);
     if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
+    return Ok({ state_id: bug.state_id });
+  }
+
+  async set_bug_star(id: number, value: boolean): Promise<Result<ChangeMetadataResponse, StatusError>> {
+    const bug = this.mockBugs.find(b => b.id === id);
+    if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
+    bug.metadata.starred_by = value ? ['fake_user'] : [];
+    return Ok({ state_id: bug.state_id });
+  }
+
+  async set_bug_upvote(id: number, value: boolean): Promise<Result<ChangeMetadataResponse, StatusError>> {
+    const bug = this.mockBugs.find(b => b.id === id);
+    if (!bug) return Err(NotFoundError(`Bug ${id} not found`));
+    bug.metadata.upvoted_by = value ? ['fake_user'] : [];
     return Ok({ state_id: bug.state_id });
   }
 

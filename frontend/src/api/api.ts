@@ -100,6 +100,10 @@ export interface BugMetadata {
   user_metadata: UserMetadataEntry[];
   created_at: bigint;
   state_id: bigint;
+  /// Usernames who starred the bug. A personal bookmark; any viewer can add themselves.
+  starred_by: string[];
+  /// Usernames who upvoted it; the count is this array's length.
+  upvoted_by: string[];
 }
 
 export interface Comment {
@@ -231,6 +235,9 @@ export interface API {
   get_bug_list(query?: string): Promise<Result<BugSummary[], StatusError>>;
   get_bug(id: number): Promise<Result<Bug, StatusError>>;
   get_bug_state(id: number): Promise<Result<BugStateResponse, StatusError>>;
+  /// Adds or removes the caller from a bug's star list. Needs only View access.
+  set_bug_star(id: number, value: boolean): Promise<Result<ChangeMetadataResponse, StatusError>>;
+  set_bug_upvote(id: number, value: boolean): Promise<Result<ChangeMetadataResponse, StatusError>>;
   submit_comment(id: number, content: string): Promise<Result<SubmitCommentResponse, StatusError>>;
   update_bug_metadata(id: number, field: string, value: string): Promise<Result<ChangeMetadataResponse, StatusError>>;
   get_component_metadata(id: number): Promise<Result<ComponentMetadata, StatusError>>;

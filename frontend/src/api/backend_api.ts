@@ -139,6 +139,30 @@ export class BackendApi implements API {
     );
   }
 
+  async set_bug_star(
+    id: number,
+    value: boolean
+  ): Promise<Result<ChangeMetadataResponse, StatusError>> {
+    return this.request(
+      `/api/bug/${id}/star`,
+      { method: 'POST', body: { value } },
+      'Failed to update star',
+      true
+    );
+  }
+
+  async set_bug_upvote(
+    id: number,
+    value: boolean
+  ): Promise<Result<ChangeMetadataResponse, StatusError>> {
+    return this.request(
+      `/api/bug/${id}/upvote`,
+      { method: 'POST', body: { value } },
+      'Failed to update upvote',
+      true
+    );
+  }
+
   /// Note there is no author parameter: the backend credits the comment to the
   /// authenticated caller, ignoring anything the client might claim.
   async submit_comment(

@@ -61,6 +61,8 @@ export const testBug: Bug = {
     user_metadata: [{ version: 1, key: 'Hotlist', value: 'Rendering', type: 'string' }],
     created_at: 1718016000000000000n,
     state_id: 1n,
+    starred_by: [],
+    upvoted_by: [],
   },
   comments: [
     {
@@ -129,6 +131,10 @@ export function makeStubApi(overrides: Partial<API> = {}): API {
     get_bug: async (id: number): Promise<Result<Bug, StatusError>> =>
       id === testBug.id ? Ok(testBug) : Err(NotFoundError(`No bug ${id}`)),
     get_bug_state: async (): Promise<Result<BugStateResponse, StatusError>> => Ok({ state_id: 1n }),
+    set_bug_star: async (): Promise<Result<ChangeMetadataResponse, StatusError>> =>
+      Ok({ state_id: 2n }),
+    set_bug_upvote: async (): Promise<Result<ChangeMetadataResponse, StatusError>> =>
+      Ok({ state_id: 2n }),
     submit_comment: async (): Promise<Result<SubmitCommentResponse, StatusError>> =>
       Ok({ comment_id: 2, state_id: 2n }),
     update_bug_metadata: async (): Promise<Result<ChangeMetadataResponse, StatusError>> =>

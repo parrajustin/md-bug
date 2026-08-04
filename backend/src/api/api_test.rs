@@ -52,6 +52,8 @@ fn create_test_bug(root: &StdPath, id: u32, component_id: u32, folders: Vec<Stri
         user_metadata: vec![],
         created_at: 123456789,
         state_id: 1,
+        starred_by: vec![],
+        upvoted_by: vec![],
     };
 
     let bytes = rkyv::to_bytes::<_, 1024>(&metadata)
@@ -909,6 +911,8 @@ fn bare_bug_metadata() -> BugMetadata {
         user_metadata: vec![],
         created_at: 0,
         state_id: 1,
+        starred_by: vec![],
+        upvoted_by: vec![],
     }
 }
 
@@ -1161,4 +1165,192 @@ async fn a_bot_does_not_inherit_what_an_api_token_would() {
         !bot.can(&meta, &Permission::ComponentAdmin),
         "a bot must not pick up grants made to its owner"
     );
+}
+
+/// Builds state around a single bug so the marker endpoints can be driven directly.
+async fn state_with_bug(root: &StdPath) -> anyhow::Result<Arc<AppState>> {
+    create_test_component(root, "proj", "Proj", vec!["admin".to_string()], vec![])?;
+    create_test_bug(root, 1, 1, vec!["proj".to_string()])?;
+
+    let mut component_cache = ComponentIdCache::default();
+    component_cache.insert(0, "".to_string());
+    component_cache.insert(1, "proj".to_string());
+
+    Ok(Arc::new(AppState {
+        root: root.to_path_buf(),
+        bug_cache: BugIdCache::load_and_update(root),
+        component_cache: Mutex::new(component_cache),
+        bug_locks: Mutex::new(HashMap::new()),
+        component_locks: Mutex::new(HashMap::new()),
+        users: test_user_manager(root).await,
+    }))
+}
+
+fn read_bug(root: &StdPath, path: &str) -> BugMetadata {
+    let data = fs::read(root.join(path).join("metadata")).expect("read metadata");
+    read_versioned::<BugMetadata>(&data).expect("decode metadata")
+}
+
+#[tokio::test]
+async fn starring_a_bug_records_the_caller() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let root = dir.path();
+    let state = state_with_bug(root).await?;
+
+    let res = set_bug_star(
+        State(state.clone()),
+        Path(1),
+        RequestUser::local("alice", 1, false),
+        Json(ToggleMarkerRequest { value: true }),
+    )
+    .await
+    .into_response();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let meta = read_bug(root, "proj/1");
+    assert_eq!(meta.starred_by, vec!["alice".to_string()]);
+    assert!(meta.upvoted_by.is_empty(), "starring must not upvote");
+    Ok(())
+}
+
+#[tokio::test]
+async fn unstarring_removes_only_the_caller() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let root = dir.path();
+    let state = state_with_bug(root).await?;
+
+    for who in ["alice", "bob"] {
+        set_bug_star(
+            State(state.clone()),
+            Path(1),
+            RequestUser::local(who, 1, false),
+            Json(ToggleMarkerRequest { value: true }),
+        )
+        .await
+        .into_response();
+    }
+    assert_eq!(read_bug(root, "proj/1").starred_by.len(), 2);
+
+    set_bug_star(
+        State(state.clone()),
+        Path(1),
+        RequestUser::local("alice", 1, false),
+        Json(ToggleMarkerRequest { value: false }),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(
+        read_bug(root, "proj/1").starred_by,
+        vec!["bob".to_string()],
+        "un-starring must not clear anyone else's star"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn starring_twice_is_idempotent_and_does_not_bump_state() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let root = dir.path();
+    let state = state_with_bug(root).await?;
+
+    set_bug_star(
+        State(state.clone()),
+        Path(1),
+        RequestUser::local("alice", 1, false),
+        Json(ToggleMarkerRequest { value: true }),
+    )
+    .await
+    .into_response();
+    let after_first = read_bug(root, "proj/1").state_id;
+
+    set_bug_star(
+        State(state.clone()),
+        Path(1),
+        RequestUser::local("alice", 1, false),
+        Json(ToggleMarkerRequest { value: true }),
+    )
+    .await
+    .into_response();
+    let after_second = read_bug(root, "proj/1");
+
+    assert_eq!(after_second.starred_by.len(), 1, "no duplicate entry");
+    assert_eq!(
+        after_second.state_id, after_first,
+        "a no-op must not bump state_id, or clients refetch for nothing"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn upvoting_is_tracked_separately_from_starring() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let root = dir.path();
+    let state = state_with_bug(root).await?;
+
+    set_bug_upvote(
+        State(state.clone()),
+        Path(1),
+        RequestUser::local("alice", 1, false),
+        Json(ToggleMarkerRequest { value: true }),
+    )
+    .await
+    .into_response();
+
+    let meta = read_bug(root, "proj/1");
+    assert_eq!(meta.upvoted_by, vec!["alice".to_string()]);
+    assert!(meta.starred_by.is_empty(), "upvoting must not star");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_viewer_may_star_without_edit_rights() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let root = dir.path();
+    let state = state_with_bug(root).await?;
+
+    // create_test_bug grants PUBLIC comment access, i.e. below Full. Starring is a
+    // bookmark, so requiring edit rights would make it useless to most readers.
+    let res = set_bug_star(
+        State(state.clone()),
+        Path(1),
+        RequestUser::local("a_reader", 9, false),
+        Json(ToggleMarkerRequest { value: true }),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(read_bug(root, "proj/1").starred_by, vec!["a_reader".to_string()]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn markers_are_searchable() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let root = dir.path();
+    let state = state_with_bug(root).await?;
+
+    set_bug_star(
+        State(state.clone()),
+        Path(1),
+        RequestUser::local("alice", 1, false),
+        Json(ToggleMarkerRequest { value: true }),
+    )
+    .await
+    .into_response();
+
+    let meta = read_bug(root, "proj/1");
+    let query = SearchString::parse("starred:alice");
+    assert!(
+        match_entry(&query, &meta),
+        "starred: should match the user who starred it"
+    );
+
+    let other = SearchString::parse("starred:bob");
+    assert!(
+        !match_entry(&other, &meta),
+        "and must not match anyone else"
+    );
+    Ok(())
 }

@@ -129,6 +129,24 @@ async function freezeAnimations(page) {
   });
 }
 
+/// Blanks rendered timestamps before a capture.
+///
+/// Bug pages show a real creation time, which changes every run — two runs a minute
+/// apart would diff. This only affects the screenshot, not what is asserted.
+async function freezeTimestamps(page) {
+  await page.evaluate(() => {
+    const stamp = /[A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d{2} (AM|PM)/g;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      if (stamp.test(node.nodeValue ?? '')) {
+        node.nodeValue = (node.nodeValue ?? '').replace(stamp, '<timestamp>');
+      }
+    }
+  });
+}
+
 let stepCounter = 0;
 const results = [];
 
@@ -699,6 +717,67 @@ async function main() {
 
 
     await capture(page, 'bot-added-to-component');
+
+    // ---- Starring and upvoting a bug --------------------------------------------
+    const bugId = await (
+      await api(`${base}/api/create_bug`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiToken2}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          component_id: target.id,
+          template_name: '',
+          title: 'A bug worth starring',
+          description: 'body',
+          collaborators: [],
+          cc: [],
+        }),
+      })
+    ).json();
+
+    await page.goto(`${base}/issue/${bugId}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('[data-testid="star-button"]');
+    await freezeTimestamps(page);
+    await capture(page, 'bug-markers-neutral');
+
+    await page.click('[data-testid="star-button"]');
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[data-testid="star-button"]')?.getAttribute('aria-pressed') ===
+        'true'
+    );
+    await page.click('[data-testid="upvote-button"]');
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector('[data-testid="upvote-button"]')
+          ?.getAttribute('aria-pressed') === 'true'
+    );
+    // Move the pointer away so a hover tooltip does not float over the capture.
+    await page.mouse.move(0, 0);
+    await freezeTimestamps(page);
+    await capture(page, 'bug-markers-active');
+
+    // Confirm they were persisted, not just flipped optimistically in the browser.
+    const markedBug = await (
+      await api(`${base}/api/bug/${bugId}`, {
+        headers: { Authorization: `Bearer ${apiToken2}` },
+      })
+    ).json();
+    if (!markedBug.metadata.starred_by.includes('admin')) {
+      throw new Error(`star was not persisted: ${JSON.stringify(markedBug.metadata.starred_by)}`);
+    }
+    if (!markedBug.metadata.upvoted_by.includes('admin')) {
+      throw new Error(`upvote was not persisted: ${JSON.stringify(markedBug.metadata.upvoted_by)}`);
+    }
+    log('behaviour       star and +1 persisted server-side');
+
+    // And that they survive a reload, rather than living only in local state.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('[data-testid="star-button"][aria-pressed="true"]');
+    log('behaviour       markers survive a reload');
 
     const afterGrant = await listAsBot();
     if (!afterGrant.some((c) => c.name === 'bot_playground')) {

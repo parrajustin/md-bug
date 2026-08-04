@@ -545,6 +545,14 @@ pub struct BugMetadata {
         deserialize_with = "deserialize_u64_from_string_n"
     )]
     pub state_id: u64,
+    /// Usernames who starred this bug. A personal bookmark, so any viewer may add
+    /// themselves — it is not an edit to the bug's content.
+    #[serde(default)]
+    pub starred_by: Vec<String>,
+    /// Usernames who upvoted it. Same permission reasoning as starring; the count is the
+    /// number of distinct usernames here.
+    #[serde(default)]
+    pub upvoted_by: Vec<String>,
 }
 
 impl HasVersion for BugMetadata {
@@ -1545,6 +1553,8 @@ pub async fn create_bug(
         user_metadata: vec![],
         created_at,
         state_id: 1,
+        starred_by: vec![],
+        upvoted_by: vec![],
     };
 
     // 9. Create directory
@@ -1918,6 +1928,8 @@ fn match_condition(key: &str, values: &[String], metadata: &BugMetadata, is_excl
         "cc" => metadata.cc.clone(),
         "collaborator" => metadata.collaborators.clone(),
         "componentid" => vec![metadata.component_id.to_string()],
+        "starred" => metadata.starred_by.clone(),
+        "upvoted" => metadata.upvoted_by.clone(),
         "involves" => {
             let mut all = vec![
                 metadata.reporter.clone(),
@@ -2425,3 +2437,96 @@ where
 
 #[cfg(test)]
 mod api_test;
+
+/// Request payload for toggling a personal marker on a bug.
+#[derive(SerdeDeserialize)]
+pub struct ToggleMarkerRequest {
+    pub value: bool,
+}
+
+/// Adds or removes the caller from one of a bug's marker lists.
+///
+/// Starring and upvoting need only **View** access: they record who is interested, not
+/// what the bug says. Requiring Full access — as `update_bug_metadata` does — would mean
+/// only people who can edit a bug could bookmark it.
+async fn toggle_bug_marker(
+    state: Arc<AppState>,
+    user: RequestUser,
+    id: u32,
+    value: bool,
+    starred: bool,
+) -> Result<impl IntoResponse, StatusCode> {
+    let lock = state.get_bug_lock(id);
+    let _guard = lock.lock().await;
+
+    let bug_path = find_bug_path(&state, id).ok_or(StatusCode::NOT_FOUND)?;
+    let meta_path = bug_path.join("metadata");
+
+    let data = fs::read(&meta_path).map_err(|_| StatusCode::NOT_FOUND)?;
+    let mut metadata =
+        read_versioned::<BugMetadata>(&data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let resolved_meta = {
+        let cache = state
+            .component_cache
+            .lock()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let path = cache
+            .get_path(metadata.component_id)
+            .ok_or(StatusCode::NOT_FOUND)?;
+        drop(cache);
+        resolve_component_metadata(&state.root, &path)
+    };
+
+    if user.bug_access(&metadata, &resolved_meta) < UserAccessLevel::View {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let list = if starred {
+        &mut metadata.starred_by
+    } else {
+        &mut metadata.upvoted_by
+    };
+
+    let already = list.iter().any(|u| u == &user.username);
+    if value && !already {
+        list.push(user.username.clone());
+    } else if !value && already {
+        list.retain(|u| u != &user.username);
+    } else {
+        // Nothing changed, so do not burn a state_id — the frontend uses it for cache
+        // invalidation and a no-op write would force pointless refetches.
+        return Ok(Json(ChangeMetadataResponse {
+            state_id: metadata.state_id,
+        }));
+    }
+
+    metadata.state_id += 1;
+    let bytes = rkyv::to_bytes::<_, 2048>(&metadata)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    fs::write(&meta_path, bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(ChangeMetadataResponse {
+        state_id: metadata.state_id,
+    }))
+}
+
+/// `POST /api/bug/:id/star`
+pub async fn set_bug_star(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<u32>,
+    user: RequestUser,
+    Json(payload): Json<ToggleMarkerRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    toggle_bug_marker(state, user, id, payload.value, /*starred=*/ true).await
+}
+
+/// `POST /api/bug/:id/upvote`
+pub async fn set_bug_upvote(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<u32>,
+    user: RequestUser,
+    Json(payload): Json<ToggleMarkerRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    toggle_bug_marker(state, user, id, payload.value, /*starred=*/ false).await
+}

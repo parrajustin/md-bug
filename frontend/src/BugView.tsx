@@ -26,6 +26,9 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import CloseIcon from '@mui/icons-material/Close';
 import EditIcon from '@mui/icons-material/Edit';
+import StarIcon from '@mui/icons-material/Star';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
+import ThumbUpIcon from '@mui/icons-material/ThumbUp';
 import { type Bug, type Comment, get_api } from './api/api';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -163,6 +166,45 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, o
     } else {
       alert(`Failed to update ${field}: ` + result.val.message);
     }
+  };
+
+  const isStarred = (bug.metadata.starred_by ?? []).includes(username);
+  const hasUpvoted = (bug.metadata.upvoted_by ?? []).includes(username);
+
+  /// Toggles a marker, updating local state optimistically so the colour flips at once.
+  /// The server is the source of truth; on failure we put it back.
+  const toggleMarker = async (
+    field: 'starred_by' | 'upvoted_by',
+    next: boolean,
+    call: (value: boolean) => Promise<{ ok: boolean; val: unknown }>
+  ) => {
+    const previous = bug.metadata[field] ?? [];
+    const optimistic = next
+      ? [...previous, username]
+      : previous.filter((u) => u !== username);
+    setBug({ ...bug, metadata: { ...bug.metadata, [field]: optimistic } });
+
+    const result = await call(next);
+    if (!result.ok) {
+      setBug({ ...bug, metadata: { ...bug.metadata, [field]: previous } });
+      alert('Failed to update: ' + (result.val as { message?: string }).message);
+    }
+  };
+
+  const handleToggleStar = async () => {
+    const apiResult = get_api();
+    if (!apiResult.ok) return;
+    await toggleMarker('starred_by', !isStarred, (v) =>
+      apiResult.val.set_bug_star(bug.id, v)
+    );
+  };
+
+  const handleToggleUpvote = async () => {
+    const apiResult = get_api();
+    if (!apiResult.ok) return;
+    await toggleMarker('upvoted_by', !hasUpvoted, (v) =>
+      apiResult.val.set_bug_upvote(bug.id, v)
+    );
   };
 
   const handleCommentSubmit = async () => {
@@ -367,7 +409,39 @@ const BugView: React.FC<BugViewProps> = ({ bug: initialBug, onHome, onRefresh, o
         {/* Sidebar Metadata */}
         <Box sx={{ width: { xs: '100%', md: 350 }, flexShrink: 0 }}>
           <Paper variant="outlined" sx={{ p: 2, position: 'sticky', top: 88 }}>
-            <Typography variant="h6" gutterBottom>Metadata</Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+              <Typography variant="h6">Metadata</Typography>
+              <Box sx={{ flexGrow: 1 }} />
+              {/* Personal markers. These need only View access, so they stay enabled
+                  for readers who cannot edit anything else on the bug. */}
+              <Tooltip title={isStarred ? 'Remove star' : 'Star this bug'}>
+                <IconButton
+                  size="small"
+                  onClick={handleToggleStar}
+                  data-testid="star-button"
+                  aria-pressed={isStarred}
+                  sx={{ color: isStarred ? 'warning.main' : 'text.secondary' }}
+                >
+                  {isStarred ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
+                </IconButton>
+              </Tooltip>
+              <Tooltip title={hasUpvoted ? 'Remove your +1' : '+1 this bug'}>
+                <Button
+                  size="small"
+                  onClick={handleToggleUpvote}
+                  data-testid="upvote-button"
+                  aria-pressed={hasUpvoted}
+                  startIcon={<ThumbUpIcon fontSize="small" />}
+                  sx={{
+                    minWidth: 0,
+                    ml: 0.5,
+                    color: hasUpvoted ? 'success.main' : 'text.secondary',
+                  }}
+                >
+                  {bug.metadata.upvoted_by?.length ?? 0}
+                </Button>
+              </Tooltip>
+            </Box>
             <Divider sx={{ mb: 2 }} />
             
             <Stack spacing={2.5}>

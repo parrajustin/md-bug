@@ -222,6 +222,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/bug/:id", get(api::get_bug))
         .route("/api/bug/:id/state", get(api::get_bug_state))
         .route("/api/bug/:id/comment", post(api::submit_comment))
+        .route("/api/bug/:id/star", post(api::set_bug_star))
+        .route("/api/bug/:id/upvote", post(api::set_bug_upvote))
         .route("/api/bug/:id/update_metadata", post(api::update_bug_metadata))
         .route("/api/component_list", get(api::get_component_list))
         .route("/api/create_component", post(api::create_component))
