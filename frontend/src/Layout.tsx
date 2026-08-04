@@ -190,16 +190,29 @@ const Layout: React.FC<LayoutProps> = ({ children, username, isAdmin, onSignOut,
     setIsDrawerOpen(!isDrawerOpen);
   };
 
-  const navItems = [
-    { text: 'Home', icon: <HomeIcon />, path: '/', action: () => onSearch('') },
-    { text: 'Assigned to me', icon: <AssignmentIcon />, action: () => navigate('/issue/423673307') },
-    { text: 'Non-existent Bug', icon: <NotificationImportantIcon />, action: () => navigate('/issue/999') },
-    { text: 'Starred by me', icon: <StarIcon /> },
-    { text: 'Upvoted by me', icon: <ThumbUpIcon /> },
-    { text: 'CC\'d to me', icon: <NotificationImportantIcon /> },
-    { text: 'Collaborating', icon: <PeopleIcon /> },
-    { text: 'Reported by me', icon: <HistoryIcon /> },
-    { text: 'To be verified', icon: <VerifiedIcon /> },
+  /// Runs a saved search and shows the results on the home view.
+  ///
+  /// Every entry below used to be dead: two jumped to hardcoded bug ids left over from
+  /// debugging, and the rest had no handler at all.
+  const runSearch = (query: string) => {
+    navigate('/');
+    onSearch(query);
+  };
+
+  const navItems: {
+    text: string;
+    icon: React.ReactNode;
+    query?: string;
+    action?: () => void;
+  }[] = [
+    { text: 'Home', icon: <HomeIcon />, action: () => runSearch('') },
+    { text: 'Assigned to me', icon: <AssignmentIcon />, query: `assignee:${username}` },
+    { text: 'Starred by me', icon: <StarIcon />, query: `starred:${username}` },
+    { text: 'Upvoted by me', icon: <ThumbUpIcon />, query: `upvoted:${username}` },
+    { text: "CC'd to me", icon: <NotificationImportantIcon />, query: `cc:${username}` },
+    { text: 'Collaborating', icon: <PeopleIcon />, query: `collaborator:${username}` },
+    { text: 'Reported by me', icon: <HistoryIcon />, query: `reporter:${username}` },
+    { text: 'To be verified', icon: <VerifiedIcon />, query: `verifier:${username}` },
   ];
 
   const handleCreateMenuClose = () => {
@@ -393,9 +406,15 @@ const Layout: React.FC<LayoutProps> = ({ children, username, isAdmin, onSignOut,
               <ListItemButton 
                 onClick={() => {
                   if (item.action) item.action();
-                  else if (item.path) navigate(item.path);
+                  else if (item.query !== undefined) runSearch(item.query);
                 }}
-                selected={item.path ? location.pathname === item.path : false}
+                data-testid={`nav-${item.text.toLowerCase().replace(/[^a-z]+/g, '-')}`}
+                selected={
+                  // Highlight whichever saved search is currently showing.
+                  item.query !== undefined
+                    ? location.pathname === '/' && searchValue === item.query
+                    : location.pathname === '/' && searchValue === ''
+                }
                 sx={{ 
                   borderRadius: 1,
                   mb: 0.5,

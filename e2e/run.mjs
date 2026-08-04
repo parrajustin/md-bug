@@ -135,7 +135,10 @@ async function freezeAnimations(page) {
 /// apart would diff. This only affects the screenshot, not what is asserted.
 async function freezeTimestamps(page) {
   await page.evaluate(() => {
-    const stamp = /[A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d{2} (AM|PM)/g;
+    // Two formats appear: "Aug 3, 2026, 8:35 PM" on a bug page and
+    // "8/3/2026, 8:35:12 PM" in the bug list's Updated column.
+    const stamp =
+      /([A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d{2}(:\d{2})? (AM|PM))|(\d{1,2}\/\d{1,2}\/\d{4},? \d{1,2}:\d{2}(:\d{2})? (AM|PM))/g;
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     const nodes = [];
     while (walker.nextNode()) nodes.push(walker.currentNode);
@@ -778,6 +781,31 @@ async function main() {
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForSelector('[data-testid="star-button"][aria-pressed="true"]');
     log('behaviour       markers survive a reload');
+
+    // ---- The sidebar runs real searches -----------------------------------------
+    //
+    // Every one of these was dead before: two jumped to hardcoded bug ids and the rest
+    // had no handler at all.
+    await page.click('[data-testid="nav-starred-by-me"]');
+    await page.waitForFunction(
+      (title) => document.body.innerText.includes(title),
+      {},
+      'A bug worth starring'
+    );
+    await freezeTimestamps(page);
+    await capture(page, 'nav-starred-by-me');
+    log('behaviour       "Starred by me" returns the bug that was starred');
+
+    // A filter with no matches must come back empty rather than showing everything.
+    await freezeTimestamps(page);
+    await page.click('[data-testid="nav-assigned-to-me"]');
+    await page.waitForFunction(
+      (title) => !document.body.innerText.includes(title),
+      {},
+      'A bug worth starring'
+    );
+    await capture(page, 'nav-assigned-to-me-empty');
+    log('behaviour       "Assigned to me" filters that bug out (nobody is assigned)');
 
     const afterGrant = await listAsBot();
     if (!afterGrant.some((c) => c.name === 'bot_playground')) {
