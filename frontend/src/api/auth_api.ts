@@ -160,22 +160,27 @@ export class AuthApi {
     return Ok(undefined);
   }
 
+  /// Creates an account. The server generates the password and returns it **once** so
+  /// the admin can hand it over; the new user is forced to replace it on first login.
   async createUser(
     accessToken: string,
     username: string,
-    password: string,
     isAdmin: boolean
-  ): Promise<Result<void, StatusError>> {
+  ): Promise<Result<{ username: string; password: string }, StatusError>> {
     const response = await this.postJson(
       '/api/auth/users',
-      { username, password, is_admin: isAdmin },
+      { username, is_admin: isAdmin },
       accessToken
     );
     if (response.err) return response;
 
     const resp = response.safeUnwrap();
     if (!resp.ok) return Err(errorForStatus(resp.status, 'Could not create user'));
-    return Ok(undefined);
+
+    const parsed = await WrapPromise(resp.json(), 'Malformed user response');
+    if (parsed.err) return parsed;
+    const body = parsed.safeUnwrap() as { username: string; password: string };
+    return Ok({ username: body.username, password: body.password });
   }
 
   async listApiTokens(accessToken: string): Promise<Result<PersonalToken[], StatusError>> {

@@ -496,6 +496,84 @@ async function main() {
     }
     log('behaviour       bot refused root creation (403) despite admin owner');
 
+    // ---- A new account is created with a generated password --------------------
+    //
+    // The admin never chooses it and the server returns it exactly once, so the whole
+    // handover is: create, read the password, give it to the person.
+    const createdUser = await api(`${base}/api/auth/users`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiToken2}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ username: 'newbie', is_admin: false }),
+    });
+    if (createdUser.status !== 201) {
+      throw new Error(`creating a user should be 201, got ${createdUser.status}`);
+    }
+    const newUser = await createdUser.json();
+    if (!newUser.password || newUser.password.length < 20) {
+      throw new Error(`expected a generated password, got ${JSON.stringify(newUser)}`);
+    }
+    log(
+      `behaviour       account created with a generated ${newUser.password.length}-char password`
+    );
+
+    // That password gets the new user as far as the rotation screen and no further.
+    const newbieLogin = await (
+      await api(`${base}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'newbie', password: newUser.password }),
+      })
+    ).json();
+    if (newbieLogin.must_change_password !== true) {
+      throw new Error('a freshly created account must be flagged for rotation');
+    }
+    const blocked = await api(`${base}/api/component_list`, {
+      headers: { Authorization: `Bearer ${newbieLogin.access_token}` },
+    });
+    if (blocked.status !== 403) {
+      throw new Error(
+        `an un-rotated account must be refused, got ${blocked.status}`
+      );
+    }
+    log('behaviour       new account is refused (403) until it rotates its password');
+
+    // Walk that first login through the UI.
+    await page.goto(`${base}/`, { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => indexedDB.deleteDatabase('md-bug-db'));
+    await page.goto(`${base}/`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('[data-testid="login-card"]');
+    await page.type('[data-testid="login-username"]', 'newbie');
+    await page.type('[data-testid="login-password"]', newUser.password);
+    await page.click('[data-testid="login-submit"]');
+    await page.waitForSelector('[data-testid="change-password-card"]');
+    await capture(page, 'new-user-forced-rotation');
+
+    const NEWBIE_PASSWORD = 'newbie-picked-this-1';
+    await page.type('[data-testid="current-password"]', newUser.password);
+    await page.type('[data-testid="new-password"]', NEWBIE_PASSWORD);
+    await page.type('[data-testid="confirm-password"]', NEWBIE_PASSWORD);
+    await page.click('[data-testid="change-password-submit"]');
+    await page.waitForSelector('[data-testid="login-card"]');
+
+    await page.type('[data-testid="login-username"]', 'newbie');
+    await page.type('[data-testid="login-password"]', NEWBIE_PASSWORD);
+    await page.click('[data-testid="login-submit"]');
+    await page.waitForSelector('header');
+    await capture(page, 'new-user-signed-in');
+    log('behaviour       new account works after rotating its generated password');
+
+    // Back to the admin for the remaining steps.
+    await page.evaluate(() => indexedDB.deleteDatabase('md-bug-db'));
+    await page.goto(`${base}/`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('[data-testid="login-card"]');
+    await page.type('[data-testid="login-username"]', 'admin');
+    await page.type('[data-testid="login-password"]', ACCOUNT_PASSWORD);
+    await page.click('[data-testid="login-submit"]');
+    await page.waitForSelector('header');
+
     // ---- Steps 14-17: grant the bot access to a component it could not see ------
     //
     // This is the whole feature end to end: a bot starts with nothing (PUBLIC does not

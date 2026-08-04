@@ -357,3 +357,55 @@ async fn lists_and_counts_users() {
     assert!(names.contains(&"alice".to_string()));
     assert!(names.contains(&"bob".to_string()));
 }
+
+#[tokio::test]
+async fn an_admin_created_account_must_rotate_before_use() {
+    let (mgr, _dir) = manager().await;
+
+    // Mirrors what the create-user endpoint does: a generated password, flagged for
+    // replacement because someone other than the holder has seen it.
+    let generated = crate::auth::generate_secret();
+    mgr.create_user("newbie", None, Some(&generated), false, true)
+        .await
+        .expect("create");
+
+    let user = mgr
+        .get_user(UserIdentifier::Username("newbie".into()))
+        .await
+        .expect("user");
+    assert!(
+        user.must_change_password,
+        "an account whose password an admin has seen must be forced to rotate"
+    );
+
+    // The generated password works for the login that leads to the rotation screen.
+    assert!(mgr.verify_password("newbie", &generated).await.is_ok());
+
+    // After rotating, the flag clears and the generated one stops working.
+    mgr.set_password("newbie", "chosen-by-the-holder")
+        .await
+        .expect("rotate");
+    let user = mgr
+        .get_user(UserIdentifier::Username("newbie".into()))
+        .await
+        .expect("user");
+    assert!(!user.must_change_password);
+    assert!(mgr.verify_password("newbie", &generated).await.is_err());
+    assert!(mgr.verify_password("newbie", "chosen-by-the-holder").await.is_ok());
+}
+
+#[tokio::test]
+async fn generated_passwords_differ_between_accounts() {
+    let (mgr, _dir) = manager().await;
+
+    let first = crate::auth::generate_secret();
+    let second = crate::auth::generate_secret();
+    assert_ne!(first, second, "each account must get its own password");
+
+    mgr.create_user("a", None, Some(&first), false, true).await.expect("a");
+    mgr.create_user("b", None, Some(&second), false, true).await.expect("b");
+
+    // One account's password must not open another.
+    assert!(mgr.verify_password("a", &second).await.is_err());
+    assert!(mgr.verify_password("b", &first).await.is_err());
+}

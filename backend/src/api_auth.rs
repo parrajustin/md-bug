@@ -243,10 +243,10 @@ pub async fn me(user: RequestUser) -> impl IntoResponse {
     })
 }
 
+/// Account creation takes no password: the server generates one.
 #[derive(Deserialize)]
 pub struct CreateUserRequest {
     pub username: String,
-    pub password: String,
     #[serde(default)]
     pub is_admin: bool,
 }
@@ -255,6 +255,10 @@ pub struct CreateUserRequest {
 pub struct CreateUserResponse {
     pub username: String,
     pub uid: u64,
+    /// The generated password, returned **once** so the admin can hand it over. It is
+    /// stored only as an Argon2 hash and can never be read back — if it is lost the
+    /// account needs a new one.
+    pub password: String,
 }
 
 /// `POST /api/auth/users` — admin-only account creation.
@@ -279,17 +283,20 @@ pub async fn create_user(
         // bot namespace (`--`), so a username can never impersonate a token identity.
         return Err(StatusCode::BAD_REQUEST);
     }
-    if payload.password.len() < MIN_PASSWORD_LEN {
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    // Generated rather than admin-chosen: an admin picking passwords tends to reuse a
+    // weak one, and they would know every user's password. This one is high-entropy and
+    // must be replaced on first login anyway.
+    let password = crate::auth::generate_secret();
 
     let uid = state
         .users
         .create_user(
             &payload.username,
             None,
-            Some(&payload.password),
+            Some(&password),
             payload.is_admin,
+            // The admin saw this password, so the holder must replace it before the
+            // account can do anything else.
             /*must_change_password=*/ true,
         )
         .await
@@ -300,6 +307,7 @@ pub async fn create_user(
         Json(CreateUserResponse {
             username: payload.username,
             uid,
+            password,
         }),
     ))
 }
