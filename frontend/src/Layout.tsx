@@ -274,14 +274,21 @@ const Layout: React.FC<LayoutProps> = ({ children, username, isAdmin, onSignOut,
             <Avatar sx={{ width: 32, height: 32, fontSize: '0.8rem', bgcolor: 'primary.main' }}>
               {username.charAt(0).toUpperCase()}
             </Avatar>
-            <Menu
-              anchorEl={anchorEl}
-              open={Boolean(anchorEl)}
-              onClose={() => setAnchorEl(null)}
-              transformOrigin={{ horizontal: 'right', vertical: 'top' }}
-              anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
-            >
-              <MenuItem
+          </Box>
+          {/* Deliberately a sibling of the trigger, not a child of it.
+              MUI portals the menu elsewhere in the DOM, but React events bubble through
+              the React tree — so while it lived inside the trigger, every click on a menu
+              item or on the backdrop bubbled back into the trigger's onClick and
+              reopened the menu. The result was a menu that could never be dismissed and a
+              backdrop that swallowed every other click on the page. */}
+          <Menu
+            anchorEl={anchorEl}
+            open={Boolean(anchorEl)}
+            onClose={() => setAnchorEl(null)}
+            transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+            anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+          >
+            <MenuItem
               onClick={() => { setAnchorEl(null); navigate('/account'); }}
               data-testid="menu-account"
             >
@@ -296,9 +303,10 @@ const Layout: React.FC<LayoutProps> = ({ children, username, isAdmin, onSignOut,
                 Administration
               </MenuItem>
             )}
-            <MenuItem onClick={handleSignOut}>Sign out</MenuItem>
-            </Menu>
-          </Box>
+            <MenuItem onClick={handleSignOut} data-testid="menu-sign-out">
+              Sign out
+            </MenuItem>
+          </Menu>
         </Toolbar>
       </AppBar>
       <Drawer

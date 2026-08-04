@@ -361,15 +361,38 @@ async function main() {
     await capture(page, 'user-menu-open');
 
     // ---- Step 12: the account page ---------------------------------------------
+    // Clicking away must dismiss the menu and leave the page usable. The menu used to
+    // live inside its own trigger, so any click bubbled back and reopened it — the
+    // backdrop stayed up and swallowed everything else on the page.
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(
+      () => !document.querySelector('.MuiBackdrop-root, .MuiModal-backdrop')
+    );
+    const stillClickable = await page.evaluate(() => {
+      const el = document.querySelector('[data-testid="nav-starred-by-me"]');
+      if (!el) return false;
+      // elementFromPoint returns whatever would actually receive the click, so an
+      // invisible backdrop over the page shows up here.
+      const box = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return el.contains(hit) || el === hit;
+    });
+    if (!stillClickable) {
+      throw new Error('something is covering the page after the user menu closed');
+    }
+    log('behaviour       user menu dismisses and leaves the page clickable');
+
+    await page.click('[data-testid="user-menu"]');
+    await page.waitForSelector('[data-testid="menu-account"]');
     await page.click('[data-testid="menu-account"]');
     await page.waitForSelector('[data-testid="account-view"]');
     if (!page.url().endsWith('/account')) {
       throw new Error(`Account menu item should navigate to /account, got ${page.url()}`);
     }
-    // Reload so the capture is not covered by the closing menu's backdrop, and so the
-    // page is in the state a user reaching /account directly would see.
-    await page.goto(`${base}/account`, { waitUntil: 'domcontentloaded' });
-    await page.waitForSelector('[data-testid="account-view"]');
+    // Choosing an item must also close the menu, not just navigate.
+    await page.waitForFunction(
+      () => !document.querySelector('.MuiBackdrop-root, .MuiModal-backdrop')
+    );
     await capture(page, 'account-view');
 
     // ---- Step 13: changing the password from the account page ------------------

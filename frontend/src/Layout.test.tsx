@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Layout from './Layout';
 import { renderWithProviders, useStubApi, TEST_USER } from './test/harness';
@@ -158,5 +158,108 @@ describe('Layout navigation', () => {
     );
     await userEvent.click(screen.getByTestId('user-menu'));
     expect(await screen.findByTestId('menu-admin')).toBeInTheDocument();
+  });
+});
+
+describe('Layout user menu dismissal', () => {
+  beforeEach(() => {
+    useStubApi();
+  });
+
+  const openMenu = async () => {
+    await userEvent.click(screen.getByTestId('user-menu'));
+    expect(await screen.findByTestId('menu-account')).toBeInTheDocument();
+  };
+
+  it('closes when a menu item is chosen', async () => {
+    // Regression: the Menu used to be a child of its trigger. MUI portals it out of the
+    // DOM, but React events bubble through the React tree, so choosing an item bubbled
+    // back into the trigger's onClick and reopened the menu straight away.
+    renderWithProviders(
+      <Layout {...defaultProps}>
+        <div />
+      </Layout>
+    );
+    await openMenu();
+
+    await userEvent.click(screen.getByTestId('menu-account'));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('menu-account')).not.toBeInTheDocument()
+    );
+  });
+
+  it('closes when clicking away, rather than trapping the page', async () => {
+    renderWithProviders(
+      <Layout {...defaultProps}>
+        <div>page content</div>
+      </Layout>
+    );
+    await openMenu();
+
+    // MUI puts an invisible backdrop over the page; clicking it must dismiss the menu.
+    // While the bug was present the same click reopened it, so the backdrop stayed up
+    // and swallowed every subsequent click.
+    const backdrop = document.querySelector('.MuiBackdrop-root, .MuiModal-backdrop');
+    expect(backdrop).not.toBeNull();
+    await userEvent.click(backdrop as Element);
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('menu-account')).not.toBeInTheDocument()
+    );
+  });
+
+  it('leaves the page clickable after the menu is dismissed', async () => {
+    const onSearch = jest.fn();
+    renderWithProviders(
+      <Layout {...defaultProps} onSearch={onSearch}>
+        <div />
+      </Layout>
+    );
+    await openMenu();
+
+    const backdrop = document.querySelector('.MuiBackdrop-root, .MuiModal-backdrop');
+    await userEvent.click(backdrop as Element);
+    await waitFor(() =>
+      expect(screen.queryByTestId('menu-account')).not.toBeInTheDocument()
+    );
+
+    // The actual complaint: nothing else on the page responded afterwards.
+    await userEvent.click(screen.getByTestId('nav-starred-by-me'));
+    expect(onSearch).toHaveBeenCalledWith(`starred:${TEST_USER}`);
+  });
+
+  it('closes on sign out', async () => {
+    const onSignOut = jest.fn();
+    renderWithProviders(
+      <Layout {...defaultProps} onSignOut={onSignOut}>
+        <div />
+      </Layout>
+    );
+    await openMenu();
+
+    await userEvent.click(screen.getByTestId('menu-sign-out'));
+
+    expect(onSignOut).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.queryByTestId('menu-account')).not.toBeInTheDocument()
+    );
+  });
+
+  it('can be reopened after being dismissed', async () => {
+    renderWithProviders(
+      <Layout {...defaultProps}>
+        <div />
+      </Layout>
+    );
+    await openMenu();
+
+    const backdrop = document.querySelector('.MuiBackdrop-root, .MuiModal-backdrop');
+    await userEvent.click(backdrop as Element);
+    await waitFor(() =>
+      expect(screen.queryByTestId('menu-account')).not.toBeInTheDocument()
+    );
+
+    await openMenu();
   });
 });
