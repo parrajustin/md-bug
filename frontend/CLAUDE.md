@@ -1,7 +1,7 @@
 # CLAUDE.md — frontend
 
 React 19 + MUI 9 + TypeScript, bundled with esbuild. See `../CLAUDE.md` for repo-wide
-context.
+context and [../API.md](../API.md) for the API this client talks to.
 
 ## Package management
 

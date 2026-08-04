@@ -6,9 +6,15 @@ Guidance for Claude Code (claude.ai/code) working in the `md-bug` repository.
 everything to a directory tree on disk, and a React + TypeScript frontend. It is
 designed to be driven by agents as well as humans.
 
-See also `GEMINI.md` (product concepts and mandates) and `memories.md` (accumulated
-tribal knowledge) in this directory — they are the source of truth for domain rules
-and are still current. This file covers how to *build, run, and not break* things.
+See also:
+
+- **[API.md](API.md)** — the HTTP API in full: how to authenticate, every endpoint, what
+  comes back, and the traps (`u64` arrives as `"7n"` strings, `401` vs `403`, API tokens
+  vs bot accounts). Read this before writing any client, script or agent against the API.
+- `GEMINI.md` (product concepts and mandates) and `memories.md` (accumulated tribal
+  knowledge) — the source of truth for domain rules, and still current.
+
+This file covers how to *build, run, and not break* things.
 
 ## Repository layout
 
@@ -20,6 +26,7 @@ md-bug/
 ├── frontend/           # React 19 + MUI 9, bundled with esbuild
 ├── integration_tests/  # Jest; spawns the real backend binary
 ├── e2e/                # Chrome + golden screenshots (see e2e/CLAUDE.md)
+├── API.md              # The HTTP API: auth, endpoints, response shapes
 ├── skills/
 ├── Dockerfile, Dockerfile.root
 └── package.json        # root: only `npm start` (concurrently runs both halves)

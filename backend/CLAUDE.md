@@ -4,6 +4,10 @@ Rust + Axum backend for `md-bug`. See `../CLAUDE.md` for repo-wide context and
 `GEMINI.md` in this directory for the full architecture/permission write-up — this file
 is the operational quick reference.
 
+**When changing a route, a request struct or a status code, update
+[../API.md](../API.md)** — it documents the wire contract clients depend on, and a stale
+API doc is worse than none.
+
 ## Binaries
 
 Two, both from this crate:
