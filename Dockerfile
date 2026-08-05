@@ -4,9 +4,12 @@
 FROM rust:1.86-bookworm AS backend-builder
 WORKDIR /build
 # Copy the backend source
-# NOTE: This Dockerfile MUST be built from the parent directory of md-bug
-# Example: docker build -f md-bug/Dockerfile .
-COPY md-bug/backend ./backend
+# NOTE: The build context is this directory, but the frontend also needs
+# standard-ts-lib, which lives outside it (and in MonoParra is a symlink, which
+# BuildKit will not follow). It is supplied as a named build context:
+# Example: docker build --build-context standard_ts_lib=../standard-ts-lib .
+# `release.sh` does this for you.
+COPY backend ./backend
 WORKDIR /build/backend
 # Build the release binaries
 RUN cargo build --release
@@ -16,10 +19,11 @@ RUN mkdir -p /build/work
 # Stage 2: Frontend Builder
 FROM node:22-bookworm-slim AS frontend-builder
 WORKDIR /build/md-bug
-# Copy frontend and its dependency standard-ts-lib
-COPY md-bug/frontend ./frontend
-WORKDIR /build
-COPY standard-ts-lib ./standard-ts-lib
+# Copy frontend and its dependency standard-ts-lib. The layout must keep
+# standard-ts-lib two levels above frontend/, because frontend/package.json
+# depends on it as "file:../../standard-ts-lib".
+COPY frontend ./frontend
+COPY --from=standard_ts_lib . /build/standard-ts-lib
 WORKDIR /build/md-bug/frontend
 # Enable pnpm and build the production frontend
 RUN corepack enable && corepack prepare pnpm@latest --activate

@@ -29,6 +29,7 @@ md-bug/
 ├── API.md              # The HTTP API: auth, endpoints, response shapes
 ├── skills/
 ├── Dockerfile, Dockerfile.root
+├── release.sh          # builds + pushes xerofuzzion/md-bug (see Releasing)
 └── package.json        # root: only `npm start` (concurrently runs both halves)
 ```
 
@@ -104,6 +105,22 @@ are separate layers — a valid token still has to pass `has_permission`.
 `backend/src/cli.rs` builds a second binary, `md-bug-cli`, that exercises the API either
 against a local data dir (`--root`) or a running server (`--remote host:port`). Useful
 for reproducing API behavior without the browser.
+
+## Releasing
+
+`./release.sh` builds the server image and pushes it to Docker Hub as
+`xerofuzzion/md-bug:v<N>-<arch>` plus `latest-<arch>`, where `<N>` comes from
+`version.json` and is bumped only after every push succeeds. amd64 is always built;
+**arm64 only with `--arm64`**, because the Rust backend then compiles under QEMU
+emulation and takes many minutes. Requires `docker login` and `jq`.
+
+The build context is this directory, but the frontend needs `standard-ts-lib`, which
+lives outside it — and in MonoParra `tools/standard-ts-lib` is a symlink into `common/`,
+which BuildKit refuses to follow. So `Dockerfile` takes it as a **named build context**
+(`COPY --from=standard_ts_lib`) and `release.sh` passes
+`--build-context standard_ts_lib=../standard-ts-lib`. A bare `docker build .` fails
+without that flag. `Dockerfile.root` is not published and still expects the *parent*
+directory as its context (`docker build -f md-bug/Dockerfile.root ..`).
 
 ## Verification
 
