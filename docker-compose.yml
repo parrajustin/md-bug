@@ -1,0 +1,137 @@
+# docker compose for md-bug.
+#
+#   docker compose up -d          # run the published image
+#   docker compose logs -f        # the bootstrap admin password is printed ONCE, here
+#
+# Build from source instead of pulling (see docker-compose.build.yml):
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# On first start the server creates the bootstrap administrator and prints a
+# generated password to stdout exactly once. Capture it from `docker compose logs`
+# before that output rolls away. The account is flagged must_change_password, so
+# it can do nothing but rotate that password at first login.
+#
+# Note the published tags are architecture-suffixed — `latest-x86_64` and
+# `latest-aarch64`. There is no plain `latest`.
+
+services:
+  md-bug:
+    image: xerofuzzion/md-bug:${MD_BUG_TAG:-latest-x86_64}
+    container_name: md-bug
+    restart: unless-stopped
+
+    # Repeating the image's own ENTRYPOINT looks redundant, but it is load-bearing:
+    # overriding the entrypoint is what clears the image's CMD, which otherwise
+    # passes --root/--port/--frontend-dir explicitly. clap gives CLI arguments
+    # precedence over their env fallbacks, so with the stock CMD in place every
+    # BUG_*/FRONTEND_DIR value below would be silently ignored. (`command: []`
+    # and `command: ""` do NOT clear a CMD — verified against Compose v5.)
+    entrypoint: ["/app/md-bug-backend"]
+
+    environment:
+      # --- Server ------------------------------------------------------------
+      # -r, --root. Required, no default. Created if absent. Holds the entire
+      # deployment: component directories, bug markdown, and users.json.
+      BUG_ROOT: /app/work
+      # -p, --port. Binds 0.0.0.0:<port> inside the container. Binary default 8080.
+      BUG_PORT: ${MD_BUG_PORT:-7878}
+      # -f, --frontend-dir. Static SPA files, falling back to index.html.
+      # The binary's default is ../frontend/public, which does not exist in the
+      # image — so this must be set once the CMD is cleared.
+      FRONTEND_DIR: /app/public
+      # Filter for tracing_subscriber::fmt::init(). e.g. debug, md_bug_backend=debug
+      RUST_LOG: ${RUST_LOG:-debug}
+
+      # --- Bootstrap ---------------------------------------------------------
+      # --AdminUsername. Administrator created on first run, and the owner of the
+      # auto-created DEFAULT component. Only consulted while the account store is
+      # empty; changing it later renames nothing.
+      ADMIN_USERNAME: ${MD_BUG_ADMIN_USERNAME:-admin}
+      # --fake_data. Seeds sample components and bugs at startup. Development only.
+      GENERATE_FAKE_DATA: "false"
+
+      # --- One-shot flags: do NOT set these on the long-running service -------
+      # Each makes the process do its job and *exit* instead of serving, which
+      # under `restart: unless-stopped` becomes a restart loop. Use the profiled
+      # services below instead.
+      #
+      # CREATE_ROOT_COMPONENT: "My Root"   # --CreateRootComponent, then exits
+      # ADMIN_USER_ID: admin               # --AdminUserId, required with the above
+      # CREATE_USER: alice                 # --CreateUser, prompts on stdin, then exits
+      #
+      # --CreateAdmin (pairs with --CreateUser) is flag-only and has no env
+      # equivalent — it has to be passed on the command line.
+
+      # --- Testing -----------------------------------------------------------
+      # Pins the generated suffix of bot-token identities (<owner>--<suffix>) so
+      # they are reproducible; the e2e suite sets it. The token secret stays
+      # CSPRNG regardless. Leave unset in real deployments — this exists for
+      # tests, and a taken name makes token creation return 409.
+      # MD_BUG_BOT_SUFFIX: fixed_test_bot
+
+    ports:
+      - "${MD_BUG_HOST_PORT:-7878}:${MD_BUG_PORT:-7878}"
+
+    volumes:
+      # The only path the server writes to. Everything lives here: component
+      # trees, bug markdown, rkyv metadata, and users.json (accounts and hashed
+      # tokens). Back up this directory and nothing else; lose it and the
+      # install is gone.
+      - ./bug-data:/app/work
+      # Prefer Docker-managed storage (avoids host uid/gid mismatches)? Replace
+      # the bind mount above with the named volume, here and in the two tools
+      # services below:
+      # - md-bug-data:/app/work
+
+      # /app/public (frontend bundle) and /app/md-bug-backend (the binary) are
+      # baked into the image and read-only at runtime. Only mount over the
+      # frontend if you are deliberately serving a locally built one:
+      # - ./frontend/public:/app/public:ro
+
+    # No healthcheck: the final image is distroless (no shell, no curl, no wget),
+    # so a probe would mean copying a static binary into the image first.
+
+  # --- One-shot administrative runs ------------------------------------------
+  #
+  # Profiled, so `docker compose up` never starts them; `run` ignores profiles.
+  # Both share the data directory with the server. Neither requires stopping it.
+
+  # docker compose run --rm create-user
+  # Prompts for the password twice on the terminal so it never reaches shell
+  # history or the process list. Append --CreateAdmin to make the account an
+  # administrator: docker compose run --rm create-user --root /app/work \
+  #   --CreateUser alice --CreateAdmin
+  create-user:
+    profiles: [tools]
+    image: xerofuzzion/md-bug:${MD_BUG_TAG:-latest-x86_64}
+    restart: "no"
+    stdin_open: true
+    tty: true
+    entrypoint: ["/app/md-bug-backend"]
+    command: ["--root", "/app/work", "--CreateUser", "${MD_BUG_NEW_USER:-newuser}"]
+    volumes:
+      - ./bug-data:/app/work
+
+  # docker compose run --rm create-root-component
+  # Writes <root>/<sanitized_name>/component_metadata and exits. MD_BUG_ROOT_ADMIN
+  # is matched as a literal ACL string, so it must equal a real account's
+  # username or nobody holds ComponentAdmin on the new root. The name needs at
+  # least one alphanumeric character.
+  create-root-component:
+    profiles: [tools]
+    image: xerofuzzion/md-bug:${MD_BUG_TAG:-latest-x86_64}
+    restart: "no"
+    entrypoint: ["/app/md-bug-backend"]
+    command:
+      - "--root"
+      - "/app/work"
+      - "--CreateRootComponent"
+      - "${MD_BUG_ROOT_NAME:-New Root}"
+      - "--AdminUserId"
+      - "${MD_BUG_ROOT_ADMIN:-admin}"
+    volumes:
+      - ./bug-data:/app/work
+
+# Only used if you switch the bind mounts above over to it.
+volumes:
+  md-bug-data:

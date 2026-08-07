@@ -142,3 +142,9 @@ vite.config.ts.timestamp-*
 # Added by cargo
 
 /target
+
+# Server data directories: component trees, bug markdown, and users.json
+# (accounts and hashed tokens). Created by docker-compose's bind mount and by
+# `npm start` (backend runs with -r ./bug-data).
+/bug-data
+backend/bug-data
