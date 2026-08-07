@@ -1,0 +1,132 @@
+{
+    "project": "md-bug",
+    "source": "compose.cue",
+    "hostVars": [
+        {
+            "name": "MD_BUG_TAG",
+            "description": "Image tag to run. Published tags are architecture-suffixed — latest-x86_64 and latest-aarch64. There is no plain `latest`.",
+            "required": false,
+            "secret": false,
+            "default": "latest-x86_64",
+            "interpolation": "${MD_BUG_TAG:-latest-x86_64}",
+            "usedBy": [
+                {
+                    "file": "compose.yaml",
+                    "service": "md-bug"
+                }
+            ]
+        },
+        {
+            "name": "MD_BUG_PORT",
+            "description": "Port the server binds inside the container. Feeds both BUG_PORT and the container side of the port mapping.",
+            "required": false,
+            "secret": false,
+            "default": "7878",
+            "interpolation": "${MD_BUG_PORT:-7878}",
+            "usedBy": [
+                {
+                    "file": "compose.yaml",
+                    "service": "md-bug"
+                }
+            ]
+        },
+        {
+            "name": "MD_BUG_HOST_PORT",
+            "description": "Port published on the host. Change this alone to move the service without touching the container.",
+            "required": false,
+            "secret": false,
+            "default": "7878",
+            "interpolation": "${MD_BUG_HOST_PORT:-7878}",
+            "usedBy": [
+                {
+                    "file": "compose.yaml",
+                    "service": "md-bug"
+                }
+            ]
+        },
+        {
+            "name": "MD_BUG_ADMIN_USERNAME",
+            "description": "Username of the bootstrap administrator created on first run. Only consulted while the account store is empty.",
+            "required": false,
+            "secret": false,
+            "default": "admin",
+            "interpolation": "${MD_BUG_ADMIN_USERNAME:-admin}",
+            "usedBy": [
+                {
+                    "file": "compose.yaml",
+                    "service": "md-bug"
+                }
+            ]
+        },
+        {
+            "name": "RUST_LOG",
+            "description": "Tracing filter for the backend, e.g. info, debug, md_bug_backend=debug. Both a host var and a container var of the same name.",
+            "required": false,
+            "secret": false,
+            "default": "debug",
+            "interpolation": "${RUST_LOG:-debug}",
+            "usedBy": [
+                {
+                    "file": "compose.yaml",
+                    "service": "md-bug"
+                }
+            ]
+        }
+    ],
+    "containerVars": [
+        {
+            "flag": "-r, --root",
+            "name": "BUG_ROOT",
+            "service": "md-bug",
+            "description": "Data directory. Required, no default. Created if absent. Holds component trees, bug markdown, rkyv metadata and users.json.",
+            "value": "/app/work",
+            "fromHost": []
+        },
+        {
+            "flag": "-p, --port",
+            "name": "BUG_PORT",
+            "service": "md-bug",
+            "description": "Binds 0.0.0.0:<port> inside the container. Binary default is 8080.",
+            "value": "${MD_BUG_PORT:-7878}",
+            "fromHost": [
+                "MD_BUG_PORT"
+            ]
+        },
+        {
+            "flag": "-f, --frontend-dir",
+            "name": "FRONTEND_DIR",
+            "service": "md-bug",
+            "description": "Static SPA files, falling back to index.html. The binary's default is ../frontend/public, which does not exist in the image — so this must be set once the CMD is cleared.",
+            "value": "/app/public",
+            "fromHost": []
+        },
+        {
+            "name": "RUST_LOG",
+            "service": "md-bug",
+            "description": "Tracing filter for tracing_subscriber::fmt::init().",
+            "value": "${RUST_LOG:-debug}",
+            "fromHost": [
+                "RUST_LOG"
+            ]
+        },
+        {
+            "flag": "--AdminUsername",
+            "name": "ADMIN_USERNAME",
+            "service": "md-bug",
+            "description": "Administrator created on first run, and owner of the auto-created DEFAULT component. Only consulted while the account store is empty; changing it later renames nothing.",
+            "value": "${MD_BUG_ADMIN_USERNAME:-admin}",
+            "fromHost": [
+                "MD_BUG_ADMIN_USERNAME"
+            ]
+        },
+        {
+            "flag": "--fake_data",
+            "name": "GENERATE_FAKE_DATA",
+            "service": "md-bug",
+            "description": "Seeds sample components and bugs at startup. Development only.",
+            "value": "false",
+            "fromHost": []
+        }
+    ],
+    "unusedHostVars": []
+}
